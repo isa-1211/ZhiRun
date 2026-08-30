@@ -47,7 +47,7 @@ String serialLine;
 Preferences preferences;
 
 enum class RainInputState { ARMED, VERIFY_LOW, WAIT_RELEASE, VERIFY_RELEASE };
-RainInputState rainInputState = RainInputState::ARMED;
+RainInputState rainInputState = RainInputState::WAIT_RELEASE;
 unsigned long rainStateStartedAt = 0;
 unsigned long lastAcceptedRainTipAt = 0;
 
@@ -429,6 +429,11 @@ void setup() {
   pinMode(OUTLET_PUMP_PIN, OUTPUT);
   digitalWrite(OUTLET_PUMP_PIN, LOW);
   pinMode(RAIN_PIN, INPUT_PULLUP);
+  // A dry, normally-open tipping bucket must idle HIGH. Do not arm the
+  // counter while the contact is already closed or the signal is shorted.
+  rainInputState = digitalRead(RAIN_PIN) == HIGH
+      ? RainInputState::ARMED : RainInputState::WAIT_RELEASE;
+  rainStateStartedAt = millis();
   attachInterrupt(digitalPinToInterrupt(RAIN_PIN), onRainTip, FALLING);
   attachInterrupt(digitalPinToInterrupt(FLOW_PINS[0]), onFlowN, FALLING);
   attachInterrupt(digitalPinToInterrupt(FLOW_PINS[1]), onFlowP, FALLING);

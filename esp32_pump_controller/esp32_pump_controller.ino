@@ -15,13 +15,16 @@ constexpr const char *FLOW_NAMES[PUMP_COUNT] = {"N_FLOW", "P_FLOW", "K_FLOW"};
 constexpr int RAIN_PIN = 18;
 constexpr int OUTLET_PUMP_PIN = 7;
 constexpr float RAIN_MM_PER_TIP = 0.3F;
-constexpr uint32_t RAIN_DEBOUNCE_US = 50000;
+constexpr unsigned long RAIN_LOW_CONFIRM_MS = 30;
+constexpr unsigned long RAIN_RELEASE_CONFIRM_MS = 100;
+constexpr unsigned long RAIN_MIN_TIP_INTERVAL_MS = 800;
 constexpr uint32_t FLOW_DEBOUNCE_US = 2000;
 constexpr float DEFAULT_PULSES_PER_LITER = 450.0F;
 constexpr unsigned long MAX_TEST_RUN_MS = 180000;
 
 volatile uint32_t rainTips = 0;
-volatile uint32_t lastRainPulseUs = 0;
+volatile uint32_t rainRawEdges = 0;
+volatile bool rainEdgePending = false;
 volatile uint32_t flowPulses[PUMP_COUNT] = {0, 0, 0};
 volatile uint32_t lastFlowPulseUs[PUMP_COUNT] = {0, 0, 0};
 bool pumpOn[PUMP_COUNT] = {false, false, false};
@@ -43,11 +46,55 @@ String lastCommandId;
 String serialLine;
 Preferences preferences;
 
+enum class RainInputState { ARMED, VERIFY_LOW, WAIT_RELEASE, VERIFY_RELEASE };
+RainInputState rainInputState = RainInputState::ARMED;
+unsigned long rainStateStartedAt = 0;
+unsigned long lastAcceptedRainTipAt = 0;
+
 void IRAM_ATTR onRainTip() {
-  const uint32_t now = micros();
-  if (now - lastRainPulseUs >= RAIN_DEBOUNCE_US) {
-    ++rainTips;
-    lastRainPulseUs = now;
+  ++rainRawEdges;
+  rainEdgePending = true;
+}
+
+void updateRainInput() {
+  const unsigned long now = millis();
+  bool pending = false;
+  noInterrupts();
+  pending = rainEdgePending;
+  if (rainInputState != RainInputState::WAIT_RELEASE) rainEdgePending = false;
+  interrupts();
+
+  if (rainInputState == RainInputState::ARMED && pending) {
+    rainInputState = RainInputState::VERIFY_LOW;
+    rainStateStartedAt = now;
+  }
+  if (rainInputState == RainInputState::VERIFY_LOW) {
+    if (digitalRead(RAIN_PIN) != LOW) {
+      rainInputState = RainInputState::ARMED;
+    } else if (now - rainStateStartedAt >= RAIN_LOW_CONFIRM_MS) {
+      if (rainTips == 0 || now - lastAcceptedRainTipAt >= RAIN_MIN_TIP_INTERVAL_MS) {
+        ++rainTips;
+        lastAcceptedRainTipAt = now;
+      }
+      rainInputState = RainInputState::WAIT_RELEASE;
+      noInterrupts();
+      rainEdgePending = false;
+      interrupts();
+    }
+  } else if (rainInputState == RainInputState::WAIT_RELEASE) {
+    if (digitalRead(RAIN_PIN) == HIGH) {
+      rainInputState = RainInputState::VERIFY_RELEASE;
+      rainStateStartedAt = now;
+    }
+  } else if (rainInputState == RainInputState::VERIFY_RELEASE) {
+    if (digitalRead(RAIN_PIN) == LOW) {
+      rainInputState = RainInputState::WAIT_RELEASE;
+    } else if (now - rainStateStartedAt >= RAIN_RELEASE_CONFIRM_MS) {
+      rainInputState = RainInputState::ARMED;
+      noInterrupts();
+      rainEdgePending = false;
+      interrupts();
+    }
   }
 }
 
@@ -78,6 +125,13 @@ void IRAM_ATTR onFlowK() {
 uint32_t rainTipSnapshot() {
   noInterrupts();
   const uint32_t value = rainTips;
+  interrupts();
+  return value;
+}
+
+uint32_t rainRawEdgeSnapshot() {
+  noInterrupts();
+  const uint32_t value = rainRawEdges;
   interrupts();
   return value;
 }
@@ -226,13 +280,14 @@ void saveMode() {
 
 void reportSerialState() {
   const uint32_t tips = rainTipSnapshot();
+  const uint32_t rawRainEdges = rainRawEdgeSnapshot();
   uint32_t pulses[PUMP_COUNT];
   flowPulseSnapshot(pulses);
   const unsigned long now = millis();
   const float nFlow = flowRateLMin(0, pulses, now);
   const float pFlow = flowRateLMin(1, pulses, now);
   const float kFlow = flowRateLMin(2, pulses, now);
-  Serial.println(String("STATE {\"controllerSchema\":\"four_relay_independent_flow_v1\",\"firmwareVersion\":\"four_relay_job_v2\",\"valveOn\":") +
+  Serial.println(String("STATE {\"controllerSchema\":\"four_relay_independent_flow_v1\",\"firmwareVersion\":\"four_relay_job_v3_rain_filter\",\"valveOn\":") +
       (anyPumpOn() ? "true" : "false") +
       ",\"manualOpen\":" + (anyPumpOn() ? "true" : "false") +
       ",\"nPumpOn\":" + (pumpOn[0] ? "true" : "false") +
@@ -275,6 +330,9 @@ void reportSerialState() {
       ",\"flowMeters\":{\"N_FLOW\":true,\"P_FLOW\":true,\"K_FLOW\":true}" +
       ",\"rainTips\":" + String(tips) +
       ",\"rainMm\":" + String(tips * RAIN_MM_PER_TIP, 1) +
+      ",\"rainPinLevel\":" + String(digitalRead(RAIN_PIN)) +
+      ",\"rainRawEdges\":" + String(rawRainEdges) +
+      ",\"rainFilteredEdges\":" + String(rawRainEdges >= tips ? rawRainEdges - tips : 0) +
       ",\"error\":\"" + jsonEscape(lastError) +
       "\",\"lastCommandId\":\"" + jsonEscape(lastCommandId) + "\"}");
   for (int index = 0; index < PUMP_COUNT; ++index) reportFlowPulses[index] = pulses[index];
@@ -381,6 +439,7 @@ void setup() {
 }
 
 void loop() {
+  updateRainInput();
   pollSerial();
   updateFertigation();
   // A start command records pumpStartedAt inside pollSerial(). Read the

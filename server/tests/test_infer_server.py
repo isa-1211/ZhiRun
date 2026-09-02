@@ -13,6 +13,23 @@ class CaptureProvider:
 
 
 class SoilFrameValidationTests(unittest.TestCase):
+    def test_quality_gate_keeps_missing_wind_direction_noncritical(self):
+        quality = infer_server._input_quality({
+            "n_concentration_g_l": 100, "p_concentration_g_l": 80, "k_concentration_g_l": 120,
+            "soilMoist": 18, "soilTemp": 22, "soilEc": 1.0, "soilPH": 7.8,
+            "soilN": 1200, "soilP": 20, "soilK": 160,
+        }, {})
+        self.assertEqual(quality["soil_critical_missing"], [])
+        self.assertNotIn("wind_direction", quality["missing"])
+
+    def test_quality_gate_marks_missing_soil_as_irrigation_blocker(self):
+        quality = infer_server._input_quality({
+            "n_concentration_g_l": 100, "p_concentration_g_l": 80, "k_concentration_g_l": 120,
+            "soilTemp": 22, "soilEc": 1.0, "soilPH": 7.8,
+            "soilN": 1200, "soilP": 20, "soilK": 160,
+        }, {})
+        self.assertIn("soil_moisture_20_pct", quality["soil_critical_missing"])
+
     def test_complete_zero_soil_frame_is_invalid(self):
         self.assertTrue(infer_server.invalid_zero_soil_frame({
             "soilMoist": 0, "soilEc": 0, "n": 0, "p": 0, "k": 0,

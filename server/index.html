@@ -369,7 +369,7 @@
     <div class="model-shell">
       <section class="model-service">
         <div class="model-service-copy"><div><h2>呼和浩特水肥一体化 V2</h2><div class="sub">ExtraTrees 多输出策略 · 自动环境输入 · 玉米 1 亩</div></div><span class="model-tag">39,600 条策略样本</span></div>
-        <div id="mHealth" class="mstat">检测服务器模型中…</div>
+        <div id="mHealth" class="mstat">检测服务器模型中…</div><div id="mAutoStatus" class="mstat">每日 12:00 自动检查</div>
       </section>
       <section class="model-card">
         <h3>三种母液浓度</h3>
@@ -552,6 +552,14 @@ function cardHtml(f){
          '<div class="val"><span class="num">--</span><span class="unit">'+(f.unit||'')+'</span></div></div>';
 }
 let lastData={}, gridBuilt=false, gridOrder=[];
+function syncAutoModelStatus(auto){
+  const el=$('mAutoStatus');if(!el||!auto)return;
+  if(!auto.last_run_at){el.textContent='每日 12:00 自动检查 · 尚未运行';return;}
+  const stamp=new Date(Number(auto.last_run_at)*1000).toLocaleString();
+  const status=auto.last_status==='ok'?'已完成':(auto.last_status==='rejected'?'已拒绝':'异常');
+  el.textContent='每日 12:00 自动检查 · '+status+' · '+stamp;
+  el.className='mstat '+(auto.last_status==='ok'?'ok':'bad');
+}
 const DASHBOARD_HIDDEN_KEYS=new Set();
 function orderFields(){
   // 只展示环境/传感器字段。headline 在前, 其它按 schema 顺序排在后面。
@@ -569,7 +577,7 @@ function buildGrid(){
 function render(x){
   // 设备暂时离线时继续展示服务器保存的最后一帧，不把整个看板清成空白。
   // _age 只用于标记数据新鲜度，数值本身仍然可供用户参考。
-  if(x&&Object.keys(x).length){lastData=x;modelData=x;syncModelSensor();}
+  if(x&&Object.keys(x).length){lastData=x;modelData=x;syncModelSensor();syncAutoModelStatus(x.auto_model);}
   renderFarm(lastData);
   if(!gridBuilt||!gridOrder.length)return;
   for(const k of gridOrder){

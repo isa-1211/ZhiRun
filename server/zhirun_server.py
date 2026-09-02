@@ -45,6 +45,13 @@ REALTIME_DEVICE_ID = os.environ.get("ZHIRUN_REALTIME_DEVICE_ID", "").strip()
 WEATHER_FALLBACK_LATITUDE = float(os.environ.get("ZHIRUN_WEATHER_FALLBACK_LATITUDE", "40.82"))
 WEATHER_FALLBACK_LONGITUDE = float(os.environ.get("ZHIRUN_WEATHER_FALLBACK_LONGITUDE", "111.65"))
 FERTIGATION_URL = os.environ.get("ZHIRUN_FERTIGATION_URL", "http://127.0.0.1:10001").rstrip("/")
+AUTO_MODEL_ENABLED = os.environ.get("ZHIRUN_AUTO_MODEL_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
+AUTO_MODEL_EXECUTE = os.environ.get("ZHIRUN_AUTO_MODEL_EXECUTE", "0").strip().lower() in {"1", "true", "yes"}
+AUTO_MODEL_HOUR = int(os.environ.get("ZHIRUN_AUTO_MODEL_HOUR", "12"))
+AUTO_MODEL_MINUTE = int(os.environ.get("ZHIRUN_AUTO_MODEL_MINUTE", "0"))
+AUTO_MODEL_N_CONCENTRATION = float(os.environ.get("ZHIRUN_AUTO_MODEL_N_G_L", "100"))
+AUTO_MODEL_P_CONCENTRATION = float(os.environ.get("ZHIRUN_AUTO_MODEL_P_G_L", "80"))
+AUTO_MODEL_K_CONCENTRATION = float(os.environ.get("ZHIRUN_AUTO_MODEL_K_G_L", "120"))
 HISTORY_LIMIT = 720
 RECORD_INTERVAL_SECONDS = 5 * 60
 RECORDING_LIMIT = 105120  # Five-minute samples for one year.
@@ -98,6 +105,17 @@ _valve_commands_by_device = {}
 _network_attempt_by_device = {}
 _next_valve_command_id = 1
 _weather_cache = {"key": None, "updated_at": 0, "data": None}
+_auto_model_state = {
+    "enabled": AUTO_MODEL_ENABLED,
+    "execute_enabled": AUTO_MODEL_EXECUTE,
+    "schedule": f"{AUTO_MODEL_HOUR:02d}:{AUTO_MODEL_MINUTE:02d}",
+    "last_run_at": 0,
+    "last_status": "never",
+    "last_error": None,
+    "last_decision": None,
+    "last_input_quality": None,
+    "execution_queued": False,
+}
 
 # 落盘节流: 不再每帧 push 都同步写盘 (会把所有读请求堵在锁上)。
 # 改为标记脏 + 后台线程每 _SAVE_INTERVAL 秒落一次盘, 重启前再强制 flush。
@@ -177,6 +195,88 @@ def _save_loop():
             save_state()
         except Exception as exc:
             print("后台落盘异常:", exc, file=sys.stderr)
+
+
+def _auto_model_once():
+    """Run the daily model check using the latest device frame."""
+    with _lock:
+        device_id = current_device_id()
+        latest = dict(_latest_by_device.get(device_id, {})) if device_id else {}
+    payload = dict(latest)
+    payload.update({
+        "n_concentration_g_l": AUTO_MODEL_N_CONCENTRATION,
+        "p_concentration_g_l": AUTO_MODEL_P_CONCENTRATION,
+        "k_concentration_g_l": AUTO_MODEL_K_CONCENTRATION,
+    })
+    timestamp = now()
+    try:
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = Request(FERTIGATION_URL + "/predict", data=raw,
+                          headers={"Content-Type": "application/json"}, method="POST")
+        with urlopen(request, timeout=30) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        decision = result.get("decision") if isinstance(result, dict) else None
+        nested = result.get("result", {}) if isinstance(result, dict) else {}
+        queued = False
+        queue_error = None
+        if AUTO_MODEL_EXECUTE and isinstance(decision, dict) and decision.get("execution_status") == "ready":
+            job = nested.get("job", {}) if isinstance(nested, dict) else {}
+            targets = job.get("targets_l", {}) if isinstance(job, dict) else {}
+            params = {
+                "n_target_l": round(float(targets.get("N", 0) or 0), 3),
+                "p_target_l": round(float(targets.get("P", 0) or 0), 3),
+                "k_target_l": round(float(targets.get("K", 0) or 0), 3),
+                "outlet_run_s": round(float(job.get("outlet_run_s", 0) or 0), 3),
+            }
+            with _lock:
+                state = _valve_by_device.get(device_id, {}) if device_id else {}
+                if state.get("controllerSchema") != "four_relay_independent_flow_v1":
+                    queue_error = "four_relay_firmware_required"
+                elif not any(params.values()):
+                    queue_error = "empty_fertigation_job"
+                else:
+                    queued = bool(queue_valve_command(device_id, "fertigation_start", params))
+                    if not queued:
+                        queue_error = "serial_device_offline"
+        quality = decision.get("input_quality") if isinstance(decision, dict) else None
+        with _lock:
+            _auto_model_state.update({
+                "last_run_at": timestamp,
+                "last_status": "ok" if isinstance(result, dict) and result.get("ok", True) else "rejected",
+                "last_error": queue_error,
+                "last_decision": decision,
+                "last_input_quality": quality,
+                "execution_queued": queued,
+                "device_id": device_id,
+            })
+    except Exception as exc:
+        with _lock:
+            _auto_model_state.update({
+                "last_run_at": timestamp,
+                "last_status": "error",
+                "last_error": str(exc),
+                "last_decision": None,
+                "last_input_quality": None,
+                "execution_queued": False,
+                "device_id": device_id,
+            })
+        print("每日模型运行失败:", exc, file=sys.stderr)
+
+
+def _auto_model_loop():
+    last_run_day = None
+    while True:
+        try:
+            local = time.localtime()
+            day = (local.tm_year, local.tm_yday)
+            minute = local.tm_hour * 60 + local.tm_min
+            target = AUTO_MODEL_HOUR * 60 + AUTO_MODEL_MINUTE
+            if AUTO_MODEL_ENABLED and target <= minute < target + 5 and day != last_run_day:
+                _auto_model_once()
+                last_run_day = day
+        except Exception as exc:
+            print("每日模型调度异常:", exc, file=sys.stderr)
+        time.sleep(20)
 
 
 def latest_age(record):
@@ -727,7 +827,14 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     data = {"_ts": 0, "_age": 999999}
             data["_age"] = latest_age(data)
+            with _lock:
+                data["auto_model"] = dict(_auto_model_state)
             self.send_json(200, data)
+            return
+
+        if path == "/fertigation/auto/status":
+            with _lock:
+                self.send_json(200, dict(_auto_model_state))
             return
 
         if path in {"/recording/status", "/recording/export"}:
@@ -1147,6 +1254,9 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     save_thread = threading.Thread(target=_save_loop, name="state-saver", daemon=True)
     save_thread.start()
+    if AUTO_MODEL_ENABLED:
+        auto_model_thread = threading.Thread(target=_auto_model_loop, name="daily-model", daemon=True)
+        auto_model_thread.start()
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"智润服务已启动, 监听 0.0.0.0:{PORT}")
     print(f"浏览器查看: http://<本机IP>:{PORT}/")

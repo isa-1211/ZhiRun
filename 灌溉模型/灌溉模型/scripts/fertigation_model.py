@@ -450,6 +450,12 @@ def _soil_levels(environment: EnvironmentInput) -> tuple[str, str, str]:
             level(environment.soil_k_mg_kg, 100, 220))
 
 
+def _input_quality(environment: EnvironmentInput) -> dict[str, Any]:
+    source = environment.source if isinstance(environment.source, Mapping) else {}
+    quality = source.get("input_quality", {})
+    return dict(quality) if isinstance(quality, Mapping) else {}
+
+
 def _observation_doy(value: str | None) -> int:
     if value:
         try:
@@ -612,6 +618,20 @@ class FertigationModel:
             job = build_job(self.area_mu, decision, self._runtime_hardware(concentrations))
             return self._result(environment, concentrations, decision, job, soil_levels, None)
 
+        quality = _input_quality(environment)
+        soil_blockers = [str(item) for item in quality.get("soil_critical_missing", []) if item]
+        fertilizer_blockers = [str(item) for item in quality.get("fertilizer_blocked", []) if item]
+        if soil_blockers:
+            reason = "关键土壤输入缺失或异常，拒绝自动灌溉：" + ", ".join(soil_blockers)
+            decision = {
+                "crop": self.crop, "stage": stage, "irrigate": False, "irrigation_m3_mu": 0.0,
+                "fertigate": False, "nitrogen_kg_mu": 0.0, "p2o5_kg_mu": 0.0, "k2o_kg_mu": 0.0,
+                "execution_status": "safety_blocked", "execution_reason": reason,
+                "input_quality": quality, "alerts": [reason], "model": "input-quality-gate",
+            }
+            job = build_job(self.area_mu, decision, self._runtime_hardware(concentrations))
+            return self._result(environment, concentrations, decision, job, soil_levels, None)
+
         stage_cfg = CONFIG["crops"][self.crop]["stages"][stage]
         forecast = environment.forecast_summary(horizon_days=2)
         threshold = dynamic_irrigation_threshold(stage_cfg, environment, forecast)
@@ -648,11 +668,17 @@ class FertigationModel:
             safety_alerts.append("风速超过10 m/s，暂停灌溉以避免飘移")
         ph_block = not 5.0 <= environment.soil_ph <= 8.8
         cold_block = environment.soil_temperature_c < 5.0
-        fertilizer_gate = water > 0 and environment.soil_ec_ds_m < 2.0 and environment.days_since_fertigation >= 7 and not ph_block and not cold_block
+        fertilizer_gate = (
+            water > 0 and environment.soil_ec_ds_m < 2.0
+            and environment.days_since_fertigation >= 7 and not ph_block and not cold_block
+            and not fertilizer_blockers
+        )
         if ph_block:
             safety_alerts.append("土壤pH超出5.0-8.8注肥安全范围")
         if cold_block:
             safety_alerts.append("土壤温度低于5°C，暂停注肥")
+        if fertilizer_blockers:
+            safety_alerts.append("N/P/K 土壤养分输入缺失或异常，本次仅允许灌水，不允许施肥")
         nutrients = [float(x) for x in prediction[1:4]] if fertilizer_gate else [0.0, 0.0, 0.0]
         for index, level in enumerate(soil_levels):
             if level == "high":
@@ -689,6 +715,7 @@ class FertigationModel:
             "soil_n_level": soil_levels[0],
             "soil_p_level": soil_levels[1], "soil_k_level": soil_levels[2], "model": "hohhot-fertigation-policy-v2",
             "model_prediction": [round(float(x), 4) for x in prediction],
+            "input_quality": quality,
             "predicted_environment": forecast, "alerts": safety_alerts,
             "confidence": "区域先验迁移基线，需用本地田间数据校准",
         }

@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """智润水肥一体化策略推理服务。"""
 import json
+import math
 import os
 import sys
 import threading
@@ -35,6 +36,81 @@ _model_class = None
 _provider = None
 _calendar = None
 _defaults = None
+
+# Input quality is tracked separately from the fallback values.  This keeps
+# missing sensor data from silently looking like a valid regional prior.
+_SOIL_RULES = {
+    "soil_moisture_20_pct": (("soil_moisture_20_pct", "moisture20", "soilMoist"), 0.0, 100.0),
+    "soil_ec_ds_m": (("soil_ec_ds_m", "soilEc", "soil_ec"), 0.0, 20.0),
+    "soil_ph": (("soil_ph", "soilPH"), 0.0, 14.0),
+    "soil_temperature_c": (("soil_temperature_c", "soilTemp"), -40.0, 70.0),
+    "soil_n_mg_kg": (("soil_n_mg_kg", "soilN"), 0.0, 10000.0),
+    "soil_p_mg_kg": (("soil_p_mg_kg", "soilP"), 0.0, 10000.0),
+    "soil_k_mg_kg": (("soil_k_mg_kg", "soilK"), 0.0, 10000.0),
+}
+_ENVIRONMENT_RULES = {
+    "air_temperature_c": (("air_temperature_c", "airTemp"), -50.0, 70.0),
+    "air_humidity_pct": (("air_humidity_pct", "airHum"), 0.0, 100.0),
+    "co2_ppm": (("co2_ppm", "co2"), 0.0, 10000.0),
+    "wind_speed_m_s": (("wind_speed_m_s", "windSpeed"), 0.0, 80.0),
+    "light_lux": (("light_lux", "lux"), 0.0, 500000.0),
+    "rain_24h_mm": (("rain_24h_mm", "rainMm"), 0.0, 2000.0),
+}
+
+
+def _quality_value(body, sensor, aliases):
+    """Find an explicitly supplied value without applying model defaults."""
+    for key in aliases:
+        if key in body and body[key] is not None:
+            return body[key]
+        if key in sensor and sensor[key] is not None:
+            return sensor[key]
+    return None
+
+
+def _input_quality(body, sensor):
+    missing = []
+    invalid = []
+    valid = {}
+    ruleset = {**_SOIL_RULES, **_ENVIRONMENT_RULES}
+    concentration_keys = {"n_concentration_g_l", "p_concentration_g_l", "k_concentration_g_l",
+                          "a_concentration_g_l", "b_concentration_g_l", "c_concentration_g_l"}
+    has_explicit_concentrations = any(key in body for key in concentration_keys)
+    if has_explicit_concentrations:
+        ruleset.update({
+            "soil_n_mg_kg": (("soil_n_mg_kg", "soilN", "n"), 0.0, 10000.0),
+            "soil_p_mg_kg": (("soil_p_mg_kg", "soilP", "p"), 0.0, 10000.0),
+            "soil_k_mg_kg": (("soil_k_mg_kg", "soilK", "k"), 0.0, 10000.0),
+        })
+    for name, (aliases, low, high) in ruleset.items():
+        value = _quality_value(body, sensor, aliases)
+        if value is None:
+            missing.append(name)
+            continue
+        try:
+            number_value = float(value)
+        except (TypeError, ValueError):
+            invalid.append(name)
+            continue
+        if not math.isfinite(number_value) or not low <= number_value <= high:
+            invalid.append(name)
+            continue
+        valid[name] = number_value
+
+    # A single soil-moisture reading is the installed controller interface;
+    # the model adapter intentionally projects it to the three root depths.
+    soil_critical = set(_SOIL_RULES)
+    soil_critical_missing = sorted(soil_critical.intersection(set(missing) | set(invalid)))
+    nutrient_missing = sorted({
+        "soil_n_mg_kg", "soil_p_mg_kg", "soil_k_mg_kg",
+    }.intersection(set(missing) | set(invalid)))
+    return {
+        "missing": sorted(missing),
+        "invalid": sorted(invalid),
+        "soil_critical_missing": soil_critical_missing,
+        "fertilizer_blocked": nutrient_missing,
+        "valid": valid,
+    }
 
 
 def load_model():
@@ -142,6 +218,12 @@ def observation_time(body, crop):
 def environment_from_request(body, crop):
     base = body.get("environment")
     sensor = dict(base) if isinstance(base, dict) else {}
+    quality = _input_quality(body, sensor)
+    for name in quality["invalid"]:
+        rules = _SOIL_RULES.get(name) or _ENVIRONMENT_RULES.get(name)
+        if rules:
+            for key in rules[0]:
+                sensor.pop(key, None)
     latitude = number(
         {"latitude": first_value(body, "latitude", default=sensor.get("latitude", _defaults[0]))},
         "latitude", _defaults[0], -90, 90,
@@ -175,6 +257,9 @@ def environment_from_request(body, crop):
             continue
         value = first_value(body, *keys)
         if value is not None:
+            rules = _SOIL_RULES.get(target) or _ENVIRONMENT_RULES.get(target)
+            if rules and target in quality["invalid"]:
+                continue
             sensor[target] = value
     moisture20 = first_value(body, "soil_moisture_20_pct", "moisture20", "soilMoist")
     if moisture20 is not None and not zero_soil_frame:
@@ -193,7 +278,16 @@ def environment_from_request(body, crop):
         **(sensor.get("source") if isinstance(sensor.get("source"), dict) else {}),
         "sensors": "ZhiRun realtime request",
         **({"soil_sensor": "invalid_zero_frame; regional prior applied"} if zero_soil_frame else {}),
+        "input_quality": quality,
     }
+    if zero_soil_frame:
+        quality["soil_critical_missing"] = sorted(set(quality["soil_critical_missing"]) | {
+            "soil_moisture_20_pct", "soil_ec_ds_m", "soil_ph",
+        })
+        quality["fertilizer_blocked"] = sorted(set(quality["fertilizer_blocked"]) | {
+            "soil_n_mg_kg", "soil_p_mg_kg", "soil_k_mg_kg",
+        })
+        sensor["source"]["input_quality"] = quality
     return _provider.fetch(
         latitude,
         longitude,

@@ -351,7 +351,7 @@
           <div class="dose-line"><div class="dose-line-head"><b>N 肥泵 + 1 号流量计</b><span id="vNState">停止</span></div><div class="dose-line-meta"><span><span id="vNVolume">0 / 0 L</span> · <span id="vNFlow">0 L/min</span></span><span class="vbtns"><button class="open" onclick="pumpTest('n','open')">启动</button><button class="close" onclick="pumpTest('n','close')">停止</button></span></div><div class="dose-progress"><i id="vNBar"></i></div></div>
           <div class="dose-line"><div class="dose-line-head"><b>P 肥泵 + 2 号流量计</b><span id="vPState">停止</span></div><div class="dose-line-meta"><span><span id="vPVolume">0 / 0 L</span> · <span id="vPFlow">0 L/min</span></span><span class="vbtns"><button class="open" onclick="pumpTest('p','open')">启动</button><button class="close" onclick="pumpTest('p','close')">停止</button></span></div><div class="dose-progress"><i id="vPBar"></i></div></div>
           <div class="dose-line"><div class="dose-line-head"><b>K 肥泵 + 3 号流量计</b><span id="vKState">停止</span></div><div class="dose-line-meta"><span><span id="vKVolume">0 / 0 L</span> · <span id="vKFlow">0 L/min</span></span><span class="vbtns"><button class="open" onclick="pumpTest('k','open')">启动</button><button class="close" onclick="pumpTest('k','close')">停止</button></span></div><div class="dose-progress"><i id="vKBar"></i></div></div>
-          <div class="dose-line"><div class="dose-line-head"><b>混合罐出口泵</b><span id="vOutletState">停止</span></div><div class="dose-line-meta"><span id="vOutletRun">0 / 0 s</span><span>三路投料完成后启动</span></div></div>
+          <div class="dose-line"><div class="dose-line-head"><b>混合罐出口泵 · IN4 / GPIO7</b><span id="vOutletState">停止</span></div><div class="dose-line-meta"><span id="vOutletRun">0 / 0 s</span><span class="vbtns"><button class="open" onclick="outletTest('open')">启动</button><button class="close" onclick="outletTest('close')">停止</button></span></div></div>
         </div>
         <button class="dose-stop" onclick="stopFertigation()">全部停止</button>
         </div>
@@ -460,7 +460,7 @@
             <div class="farm-dose-row"><span>N 泵 / 1 号表</span><b id="farmNState">停止</b><span id="farmNVolume">0 / 0 L</span></div>
             <div class="farm-dose-row"><span>P 泵 / 2 号表</span><b id="farmPState">停止</b><span id="farmPVolume">0 / 0 L</span></div>
             <div class="farm-dose-row"><span>K 泵 / 3 号表</span><b id="farmKState">停止</b><span id="farmKVolume">0 / 0 L</span></div>
-            <div class="farm-dose-row"><span>混合罐出口泵</span><b id="farmOutletState">停止</b><span id="farmOutletRun">0 / 0 s</span></div>
+            <div class="farm-dose-row"><span>混合罐出口泵 · IN4 / GPIO7</span><b id="farmOutletState">停止</b><span id="farmOutletRun">0 / 0 s</span><div class="vbtns"><button class="open" onclick="outletTest('open')">启动</button><button class="close" onclick="outletTest('close')">停止</button></div></div>
           </div>
           <button class="farm-dose-stop" onclick="stopFertigation()">全部停止</button>
           </div>
@@ -885,6 +885,18 @@ async function pumpTest(pump,act){
   }catch(e){
     const text='操作失败，请确认设备在线';$('vOut').textContent=text;if($('farmValveOut'))$('farmValveOut').textContent=text;return false;
   }
+}
+async function outletTest(act){
+  const target=act==='open';
+  $('vOut').textContent=target?'正在启动混合罐出口泵…':'正在停止混合罐出口泵…';
+  if($('farmValveOut'))$('farmValveOut').textContent=$('vOut').textContent;
+  try{
+    const r=await fetchTO('/outlet/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:act,run_seconds:10})},8000),d=await r.json();
+    if(!d.ok){const text=valveMessage(d.message,'混合罐泵测试指令失败');$('vOut').textContent=text;if($('farmValveOut'))$('farmValveOut').textContent=text;return false;}
+    const confirmed=await waitValveState(s=>String(s.lastCommandId||'')===String(d.command_id)&&!!s.outletPumpOn===target,15000);
+    const text=confirmed?(target?'混合罐出口泵已启动（10秒自动停止）':'混合罐出口泵已停止'):'混合罐泵未收到 ESP32 状态确认，请检查 IN4/GPIO7 接线';
+    $('vOut').textContent=text;if($('farmValveOut'))$('farmValveOut').textContent=text;return confirmed;
+  }catch(e){const text='操作失败，请确认设备在线';$('vOut').textContent=text;if($('farmValveOut'))$('farmValveOut').textContent=text;return false;}
 }
 // ---- 面板3: 模型 (实时数据 -> 水肥策略服务) ----
 let modelData={};

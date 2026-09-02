@@ -375,6 +375,19 @@ void handleCommand(const String &json) {
     fertigationActive = anyPumpOn();
     if (fertigationActive) fertigationState = "dosing";
     else startOutletPump();
+  } else if (action == "outlet_test") {
+    const String requested = jsonString(command, "manual_action");
+    if (requested == "open" || requested == "on") {
+      // The mixing-tank outlet is tested independently, never together with
+      // an N/P/K dosing pump. Limit a manual test to the normal safety cap.
+      for (int index = 0; index < PUMP_COUNT; ++index) setPump(index, false, "outlet_test");
+      outletTargetSeconds = min(180UL, static_cast<unsigned long>(max(1.0F, jsonNumber(command, "run_seconds", 10))));
+      startOutletPump();
+    } else if (requested == "close" || requested == "off") {
+      stopAll("outlet_test_stop");
+    } else {
+      lastError = "bad_manual_action";
+    }
   } else if (action == "manual") {
     const String requested = jsonString(command, "manual_action");
     if (requested == "close" || requested == "off") {

@@ -910,6 +910,34 @@ class Handler(BaseHTTPRequestHandler):
             self.proxy_fertigation("/predict", model_input)
             return
 
+        if path == "/outlet/test":
+            manual_action = str(obj.get("action") or "").strip().lower()
+            if manual_action not in {"open", "close"}:
+                self.send_json(400, {"ok": False, "message": "invalid_outlet_test"})
+                return
+            run_seconds = 10.0
+            if manual_action == "open":
+                try:
+                    run_seconds = min(180.0, max(1.0, float(obj.get("run_seconds", 10))))
+                except (TypeError, ValueError):
+                    self.send_json(400, {"ok": False, "message": "invalid_outlet_test"})
+                    return
+            with _lock:
+                device_id = current_valve_device_id()
+                state = _valve_by_device.get(device_id, {}) if device_id else {}
+                if state.get("controllerSchema") != "four_relay_independent_flow_v1":
+                    self.send_json(409, {"ok": False, "message": "four_relay_firmware_required"})
+                    return
+                command = queue_valve_command(device_id, "outlet_test", {
+                    "manual_action": manual_action, "run_seconds": round(run_seconds, 1),
+                })
+            if not command:
+                self.send_json(503, {"ok": False, "message": "serial_device_offline"})
+                return
+            self.send_json(202, {"ok": True, "queued": True,
+                                 "command_id": command["id"], "message": "command_queued"})
+            return
+
         if path in {"/fertigation/run", "/fertigation/stop"}:
             params = {}
             if path.endswith("/run"):

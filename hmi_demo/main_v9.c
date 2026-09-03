@@ -346,6 +346,10 @@ static void build_dashboard(void) {
     }
 
     for (unsigned i = 0; i < 5; i++) pages[i] = make_page(screen);
+    /* The data page contains 13 cards. Keep the viewport compact and let the
+     * user scroll vertically through all cards on the 800x480 display. */
+    lv_obj_add_flag(pages[0], LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(pages[0], LV_DIR_VER);
     for (unsigned i = 1; i < 5; i++) lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
 
     static const char *names[] = {
@@ -353,9 +357,9 @@ static void build_dashboard(void) {
         "Soil temperature", "Soil pH", "Soil EC", "Nitrogen N", "Phosphorus P", "Potassium K", "Wind", "Rain"
     };
     for (unsigned index = 0; index < 13; index++) {
-        int column = (int)(index % 4);
-        int row = (int)(index / 4);
-        lv_obj_t *panel = make_panel(pages[0], 7 + column * 188, 7 + row * 92, 178, 82);
+        int column = (int)(index % 3);
+        int row = (int)(index / 3);
+        lv_obj_t *panel = make_panel(pages[0], 7 + column * 252, 7 + row * 90, 244, 82);
         lv_obj_t *name = lv_label_create(panel);
         lv_label_set_text(name, names[index]);
         lv_obj_set_style_text_color(name, lv_color_hex(0x91A3BA), 0);

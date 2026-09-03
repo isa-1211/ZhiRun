@@ -419,6 +419,55 @@ def network_snapshot(server):
     return result
 
 
+def wifi_scan_results(interface="wlan0"):
+    """Scan nearby APs on the RK3506B and return frontend-ready records."""
+    try:
+        scan = subprocess.run(
+            ["wpa_cli", "-i", interface, "scan"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if scan.returncode != 0 and "FAIL" in (scan.stdout + scan.stderr).upper():
+            return []
+        # Allow the driver time to populate scan_results, but do not block the
+        # collector for the full UI polling window.
+        time.sleep(2.0)
+        result = subprocess.run(
+            ["wpa_cli", "-i", interface, "scan_results"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if result.returncode != 0:
+        return []
+    networks = []
+    lines = result.stdout.splitlines()
+    for line in lines[1:]:
+        fields = line.split("\t", 4)
+        if len(fields) < 5:
+            continue
+        bssid, frequency, signal, flags, ssid = fields
+        ssid = ssid.strip()
+        if not ssid:
+            continue
+        try:
+            freq = int(frequency)
+            rssi = int(signal)
+        except ValueError:
+            continue
+        upper_flags = flags.upper()
+        networks.append({
+            "ssid": ssid,
+            "bssid": bssid,
+            "frequency": freq,
+            "radio": "5 GHz" if freq >= 3000 else "2.4 GHz",
+            "rssi": rssi,
+            "auth": flags,
+            "lock": any(value in upper_flags for value in ("WPA", "WEP")),
+        })
+    networks.sort(key=lambda item: item["rssi"], reverse=True)
+    return networks
+
+
 def main():
     parser = argparse.ArgumentParser(description="RK3506B ZhiRun edge collector")
     parser.add_argument("--config", default="/etc/zhirun-rk3506.env")
@@ -445,7 +494,18 @@ def main():
                     query = urlencode({"token": config["ZHIRUN_TOKEN"]})
                     path = "/api/devices/%s/valve/commands/next?%s" % (quote(device_id, safe=""), query)
                     response = request_json(server + path, timeout=3)
-                    if response.get("command") and not esp.send({"command": response["command"]}):
+                    command = response.get("command") or {}
+                    if command.get("action") == "network_scan":
+                        networks = wifi_scan_results()
+                        state = dict(esp.state)
+                        state.update({
+                            "wifiNetworks": networks,
+                            "wifiScannedAt": int(time.time()),
+                            "lastCommandId": command.get("id", ""),
+                        })
+                        state_url = server + "/api/devices/%s/valve/result" % quote(device_id, safe="")
+                        request_json(state_url, {"token": config["ZHIRUN_TOKEN"], "state": state}, timeout=5)
+                    elif command and not esp.send({"command": command}):
                         raise OSError("ESP32 serial link lost before command send")
                 except (OSError, ValueError) as exc:
                     last_error = "command: %s" % exc

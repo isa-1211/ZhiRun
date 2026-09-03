@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <netdb.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,6 +24,34 @@ static lv_obj_t *status_label;
 static lv_obj_t *metric_labels[13];
 static lv_obj_t *source_label;
 static lv_obj_t *pump_label;
+static lv_obj_t *pages[5];
+static lv_obj_t *weather_label;
+static lv_obj_t *model_label;
+static lv_obj_t *network_label;
+static lv_obj_t *valve_detail_label;
+
+#define BOOT_FRAME_FILE "/userdata/zhirun/zhirun_boot_frames.rgb565"
+#define BOOT_AUDIO_FILE "/userdata/zhirun/zhirun_boot_audio.wav"
+#define BOOT_FRAME_WIDTH 800
+#define BOOT_FRAME_HEIGHT 480
+#define BOOT_FRAME_BYTES (BOOT_FRAME_WIDTH * BOOT_FRAME_HEIGHT * 2)
+#define BOOT_FRAME_COUNT 18
+#define BOOT_FRAME_INTERVAL_MS 333
+#define BOOT_DURATION_MS 6000
+
+static uint8_t *boot_frame_data;
+static lv_image_dsc_t boot_frame_dsc;
+static FILE *boot_frame_file;
+static uint32_t boot_frame_index;
+static uint32_t boot_start_tick;
+
+static void start_boot_audio(void) {
+    pid_t child = fork();
+    if (child != 0) return;
+    execl("/usr/bin/aplay", "aplay", "-q", "-D", "hw:0,0",
+          BOOT_AUDIO_FILE, (char *)NULL);
+    _exit(127);
+}
 
 static int request(const char *method, const char *path, const char *body,
                    char *out, size_t cap) {
@@ -139,9 +168,9 @@ static void refresh(lv_timer_t *timer) {
 
     if (request("GET", "/data", NULL, response, sizeof(response)) != 0) {
         fprintf(stderr, "HMI_REFRESH data_request_failed\n");
-        lv_label_set_text(status_label, "Server offline");
+        lv_label_set_text(status_label, "Device offline");
         for (unsigned index = 0; index < 13; index++) lv_label_set_text(metric_labels[index], "--");
-        lv_label_set_text(source_label, "Check Ethernet or Wi-Fi connection");
+        lv_label_set_text(source_label, "Check Ethernet or Wi-Fi");
         return;
     }
     fprintf(stderr, "HMI_REFRESH data_received\n");
@@ -166,7 +195,7 @@ static void refresh(lv_timer_t *timer) {
     fprintf(stderr, "HMI_REFRESH metrics_updated\n");
 
     bool live = strcmp(source, "rk3506") == 0 && (!has_age || age < 30.0);
-    lv_label_set_text(status_label, live ? "RK3506 live" : "Server data stale");
+    lv_label_set_text(status_label, live ? "Device online" : "Data stale");
     char source_text[180];
     if (has_age)
         snprintf(source_text, sizeof(source_text), "Device: %s | Source: %s | Age: %.0f s", device, source, age);
@@ -175,14 +204,40 @@ static void refresh(lv_timer_t *timer) {
     lv_label_set_text(source_label, source_text);
     fprintf(stderr, "HMI_REFRESH source_updated\n");
 
+    char weather_text[220];
+    snprintf(weather_text, sizeof(weather_text),
+             "Air temp %.1f C\nAir humidity %.1f %%\nWind %.1f m/s\nRain %.1f mm",
+             values[0], values[1], values[11], values[12]);
+    if (weather_label) lv_label_set_text(weather_label, weather_text);
+    if (model_label) lv_label_set_text(model_label,
+        "Model: server\nExtraTrees multi-output policy\nDaily 12:00 automatic run; manual work order available\nMissing fertilizer data allows water-only irrigation; invalid soil data blocks safely");
+
     if (request("GET", "/valve/config", NULL, response, sizeof(response)) == 0) {
-        bool online = false, pump_on = false;
+        bool online = false, pump_on = false, n_on = false, p_on = false, k_on = false, outlet_on = false;
         json_boolean(response, "online", &online);
-        if (!online) lv_label_set_text(pump_label, "Offline");
+        if (!online) {
+            lv_label_set_text(pump_label, "Controller offline");
+            if (valve_detail_label) lv_label_set_text(valve_detail_label, "Valve status unavailable");
+        }
         else {
             json_boolean(response, "valveOn", &pump_on);
-            lv_label_set_text(pump_label, pump_on ? "Pump: ON" : "Pump: OFF");
+            json_boolean(response, "nPumpOn", &n_on);
+            json_boolean(response, "pPumpOn", &p_on);
+            json_boolean(response, "kPumpOn", &k_on);
+            json_boolean(response, "outletPumpOn", &outlet_on);
+            lv_label_set_text(pump_label, pump_on ? "Irrigation: ON" : "Irrigation: OFF");
+            char detail[240];
+            snprintf(detail, sizeof(detail), "N pump GPIO4: %s\nP pump GPIO5: %s\nK pump GPIO6: %s\nOutlet GPIO7: %s",
+                     n_on ? "ON" : "OFF", p_on ? "ON" : "OFF",
+                     k_on ? "ON" : "OFF", outlet_on ? "ON" : "OFF");
+            if (valve_detail_label) lv_label_set_text(valve_detail_label, detail);
         }
+    }
+    if (network_label) {
+        char network_text[160];
+        snprintf(network_text, sizeof(network_text), "Server: http://%s:%d\nWi-Fi or Ethernet supported\nUSB insertion order is independent",
+                 HMI_SERVER_HOST, HMI_SERVER_PORT);
+        lv_label_set_text(network_label, network_text);
     }
     fprintf(stderr, "HMI_REFRESH complete\n");
 }
@@ -208,30 +263,78 @@ static lv_obj_t *make_panel(lv_obj_t *parent, int x, int y, int width, int heigh
     return panel;
 }
 
-int main(void) {
-    lv_port_init(0, 0, 0);
+static lv_obj_t *make_page(lv_obj_t *parent) {
+    lv_obj_t *page = lv_obj_create(parent);
+    lv_obj_set_pos(page, 10, 108);
+    lv_obj_set_size(page, 780, 325);
+    lv_obj_set_style_bg_color(page, lv_color_hex(0x101925), 0);
+    lv_obj_set_style_border_color(page, lv_color_hex(0x26364C), 0);
+    lv_obj_set_style_pad_all(page, 12, 0);
+    lv_obj_clear_flag(page, LV_OBJ_FLAG_SCROLLABLE);
+    return page;
+}
+
+static lv_obj_t *page_text(lv_obj_t *page, const char *text, int x, int y, int width) {
+    lv_obj_t *label = lv_label_create(page);
+    lv_label_set_text(label, text);
+    lv_obj_set_width(label, width);
+    lv_obj_set_pos(label, x, y);
+    lv_obj_set_style_text_color(label, lv_color_hex(0xDCE6F4), 0);
+    lv_obj_set_style_text_line_space(label, 7, 0);
+    return label;
+}
+
+static void switch_page(lv_event_t *event) {
+    unsigned selected = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    if (selected >= 5) return;
+    for (unsigned i = 0; i < 5; i++) {
+        if (!pages[i]) continue;
+        if (i == selected) lv_obj_clear_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void build_dashboard(void) {
     lv_obj_t *screen = lv_scr_act();
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x0B1017), 0);
 
     lv_obj_t *title = lv_label_create(screen);
-    lv_label_set_text(title, "ZhiRun fertigation monitor");
+    lv_label_set_text(title, "ZhiRun");
     lv_obj_set_style_text_color(title, lv_color_hex(0xE8EDF5), 0);
-    lv_obj_set_pos(title, 18, 15);
+    lv_obj_set_pos(title, 18, 7);
+
+    lv_obj_t *subtitle = lv_label_create(screen);
+    lv_label_set_text(subtitle, "Smart Agriculture Fertigation System");
+    lv_obj_set_style_text_color(subtitle, lv_color_hex(0x8FA3C0), 0);
+    lv_obj_set_pos(subtitle, 18, 34);
 
     status_label = lv_label_create(screen);
     lv_label_set_text(status_label, "Starting");
     lv_obj_set_style_text_color(status_label, lv_color_hex(0x58D3AE), 0);
-    lv_obj_align(status_label, LV_ALIGN_TOP_RIGHT, -18, 16);
+    lv_obj_align(status_label, LV_ALIGN_TOP_RIGHT, -18, 12);
+
+    static const char *tabs[] = {"Data", "Weather", "Valves", "Model", "Network"};
+    for (unsigned i = 0; i < 5; i++) {
+        lv_obj_t *tab = lv_btn_create(screen);
+        lv_obj_set_pos(tab, 10 + (int)i * 156, 67);
+        lv_obj_set_size(tab, 148, 33);
+        lv_obj_add_event_cb(tab, switch_page, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
+        lv_obj_t *label = lv_label_create(tab);
+        lv_label_set_text(label, tabs[i]);
+        lv_obj_center(label);
+    }
+
+    for (unsigned i = 0; i < 5; i++) pages[i] = make_page(screen);
+    for (unsigned i = 1; i < 5; i++) lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
 
     static const char *names[] = {
         "Air temperature", "Air humidity", "CO2", "Light", "Soil moisture",
-        "Soil temperature", "Soil pH", "Soil EC", "Nitrogen (N)",
-        "Phosphorus (P)", "Potassium (K)", "Wind speed", "Rainfall"
+        "Soil temperature", "Soil pH", "Soil EC", "Nitrogen N", "Phosphorus P", "Potassium K", "Wind", "Rain"
     };
     for (unsigned index = 0; index < 13; index++) {
-        int column = (int)(index % 5);
-        int row = (int)(index / 5);
-        lv_obj_t *panel = make_panel(screen, 18 + column * 153, 50 + row * 109, 145, 101);
+        int column = (int)(index % 4);
+        int row = (int)(index / 4);
+        lv_obj_t *panel = make_panel(pages[0], 7 + column * 188, 7 + row * 92, 178, 82);
         lv_obj_t *name = lv_label_create(panel);
         lv_label_set_text(name, names[index]);
         lv_obj_set_style_text_color(name, lv_color_hex(0x91A3BA), 0);
@@ -241,31 +344,131 @@ int main(void) {
         lv_obj_align(metric_labels[index], LV_ALIGN_BOTTOM_LEFT, 0, -2);
     }
 
-    lv_obj_t *control_panel = make_panel(screen, 477, 268, 145, 101);
+    lv_obj_t *control_panel = make_panel(pages[2], 7, 7, 230, 91);
     lv_obj_t *control_title = lv_label_create(control_panel);
     lv_label_set_text(control_title, "Pump status");
     lv_obj_set_style_text_color(control_title, lv_color_hex(0x58D3AE), 0);
     pump_label = lv_label_create(control_panel);
     lv_label_set_text(pump_label, "State unknown");
-    lv_obj_set_width(pump_label, 125);
+    lv_obj_set_width(pump_label, 210);
     lv_obj_set_pos(pump_label, 0, 27);
 
-    lv_obj_t *action_panel = make_panel(screen, 630, 268, 145, 101);
+    lv_obj_t *action_panel = make_panel(pages[2], 252, 7, 230, 91);
     lv_obj_t *button = lv_btn_create(action_panel);
-    lv_obj_set_size(button, 125, 70);
+    lv_obj_set_size(button, 210, 58);
     lv_obj_align(button, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_add_event_cb(button, stop_pump, LV_EVENT_CLICKED, NULL);
     lv_obj_t *button_label = lv_label_create(button);
-    lv_label_set_text(button_label, "STOP PUMP");
+    lv_label_set_text(button_label, "STOP ALL");
     lv_obj_center(button_label);
 
+    valve_detail_label = page_text(pages[2], "Waiting for valve status", 7, 119, 740);
+    weather_label = page_text(pages[1], "Waiting for environment data", 7, 7, 740);
+    model_label = page_text(pages[3], "Model: server\nExtraTrees multi-output policy\nDaily 12:00 automatic run", 7, 7, 740);
+    network_label = page_text(pages[4], "Waiting for network status", 7, 7, 740);
+
     source_label = lv_label_create(screen);
-    lv_label_set_text(source_label, "Waiting for server");
+    lv_label_set_text(source_label, "Waiting for server data");
     lv_obj_set_width(source_label, 760);
     lv_obj_set_style_text_color(source_label, lv_color_hex(0x8293A8), 0);
     lv_obj_set_pos(source_label, 18, 445);
 
     lv_timer_create(refresh, 5000, NULL);
+}
+
+static void finish_boot(lv_timer_t *timer) {
+    lv_obj_t *boot_image = (lv_obj_t *)timer->user_data;
+    lv_timer_del(timer);
+    if (boot_image) lv_obj_del(boot_image);
+    if (boot_frame_file) fclose(boot_frame_file);
+    boot_frame_file = NULL;
+    free(boot_frame_data);
+    boot_frame_data = NULL;
+    build_dashboard();
+}
+
+static bool load_boot_frames(void) {
+    boot_frame_file = fopen(BOOT_FRAME_FILE, "rb");
+    if (!boot_frame_file) return false;
+    if (fseek(boot_frame_file, 0, SEEK_END) != 0) {
+        fclose(boot_frame_file);
+        boot_frame_file = NULL;
+        return false;
+    }
+    long length = ftell(boot_frame_file);
+    if (length != (long)(BOOT_FRAME_BYTES * BOOT_FRAME_COUNT)) {
+        fclose(boot_frame_file);
+        boot_frame_file = NULL;
+        return false;
+    }
+    rewind(boot_frame_file);
+    boot_frame_data = malloc(BOOT_FRAME_BYTES);
+    if (!boot_frame_data ||
+        fread(boot_frame_data, 1, BOOT_FRAME_BYTES, boot_frame_file) != BOOT_FRAME_BYTES) {
+        free(boot_frame_data);
+        boot_frame_data = NULL;
+        fclose(boot_frame_file);
+        boot_frame_file = NULL;
+        return false;
+    }
+    memset(&boot_frame_dsc, 0, sizeof(boot_frame_dsc));
+    boot_frame_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+    boot_frame_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
+    boot_frame_dsc.header.w = BOOT_FRAME_WIDTH;
+    boot_frame_dsc.header.h = BOOT_FRAME_HEIGHT;
+    boot_frame_dsc.header.stride = BOOT_FRAME_WIDTH * 2;
+    boot_frame_dsc.data_size = BOOT_FRAME_BYTES;
+    boot_frame_dsc.data = boot_frame_data;
+    return true;
+}
+
+static void advance_boot_frame(lv_timer_t *timer) {
+    lv_obj_t *boot_image = (lv_obj_t *)timer->user_data;
+    uint32_t elapsed = lv_tick_elaps(boot_start_tick);
+    if (elapsed >= BOOT_DURATION_MS) {
+        finish_boot(timer);
+        return;
+    }
+    if (!boot_frame_data) return;
+    uint32_t next_index = elapsed / BOOT_FRAME_INTERVAL_MS;
+    if (next_index >= BOOT_FRAME_COUNT) next_index = BOOT_FRAME_COUNT - 1;
+    if (next_index == boot_frame_index) return;
+    if (fseek(boot_frame_file, (long)(next_index * BOOT_FRAME_BYTES), SEEK_SET) != 0 ||
+        fread(boot_frame_data, 1, BOOT_FRAME_BYTES, boot_frame_file) != BOOT_FRAME_BYTES)
+        return;
+    boot_frame_index = next_index;
+    lv_image_cache_drop(&boot_frame_dsc);
+    lv_image_set_src(boot_image, &boot_frame_dsc);
+    lv_obj_invalidate(boot_image);
+}
+
+static void show_boot_screen(void) {
+    lv_obj_t *screen = lv_scr_act();
+    lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000), 0);
+    lv_obj_t *boot_image = lv_image_create(screen);
+    bool loaded = load_boot_frames();
+    fprintf(stderr, "HMI_BOOT frames_loaded=%d bytes=%u\n", loaded ? 1 : 0,
+            loaded ? (unsigned)(BOOT_FRAME_BYTES * BOOT_FRAME_COUNT) : 0);
+    if (loaded) {
+        boot_frame_index = 0;
+        boot_frame_dsc.data = boot_frame_data;
+        lv_image_set_src(boot_image, &boot_frame_dsc);
+    }
+    lv_obj_set_size(boot_image, BOOT_FRAME_WIDTH, BOOT_FRAME_HEIGHT);
+    lv_obj_center(boot_image);
+    lv_obj_update_layout(screen);
+    fprintf(stderr, "HMI_BOOT object_size=%dx%d\n", (int)lv_obj_get_width(boot_image),
+            (int)lv_obj_get_height(boot_image));
+    /* Commit the first frame before audio starts, then use one shared epoch. */
+    lv_refr_now(NULL);
+    boot_start_tick = lv_tick_get();
+    start_boot_audio();
+    lv_timer_create(advance_boot_frame, 50, boot_image);
+}
+
+int main(void) {
+    lv_port_init(0, 0, 0);
+    show_boot_screen();
     while (1) {
         lv_timer_handler();
         usleep(5000);

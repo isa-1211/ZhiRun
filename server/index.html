@@ -1,7 +1,7 @@
 
 <!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>环境实时监测</title>
+<title>智润</title>
 <style>
   :root{
     --bg:#0b1017; --bg2:#0d121b; --panel:#151d2b; --panel2:#131a27;
@@ -283,10 +283,11 @@
     .farm-irrigation-body{padding:13px 15px}.farm-irrigation .farm-valve{margin-top:10px;padding-top:9px}.farm-irrigation .farm-moist{margin-top:10px}.farm-irrigation .farm-valve-stats{margin-top:8px}
   }
   @media(min-width:1261px){.farm-layout{grid-template-columns:minmax(280px,18vw) minmax(560px,1fr) minmax(280px,18vw)}}
-</style></head><body>
+</style>
+<style>body:not(.farm-mode)>.top,body:not(.farm-mode)>.wrap{display:none!important}.farm-back,.style-switch{display:none!important}</style></head><body>
 <div class="top">
   <div class="hd">
-    <div><h1 id="devName">环境实时监测</h1><div class="mode" id="devSub">连接中…</div></div>
+    <div><h1 id="devName">智润</h1><div class="mode" id="devSub">智慧农业水肥一体系统</div></div>
     <div class="header-actions" id="classicHeaderActions"><button class="record-button" id="recordBtn" title="开始数据记录" aria-label="开始数据记录" onclick="toggleRecording()">数据记录</button><button class="style-switch" onclick="setViewMode('farm')">农场模式</button><span class="badge" id="modeBadge">…</span></div>
   </div>
   <div class="tabs">
@@ -667,6 +668,7 @@ async function loadCfg(){
   const b=$('modeBadge');b.textContent=MODE_TXT[m]||m;b.className='badge'+(m==='offline'||m==='provision'||m==='setup'?' off':'');
   if(cfg.device_id)$('apName').textContent='ZhiRun-'+cfg.device_id.slice(-4).toLowerCase();
   renderFarmMeta();
+  if($('farmSubTitle'))$('farmSubTitle').textContent='智慧农业水肥一体系统'+(cfg.ip?' · '+cfg.ip:'');
 }
 const WEATHER_CODES={0:'晴朗',1:'大致晴朗',2:'局部多云',3:'阴天',45:'有雾',48:'雾凇',51:'毛毛雨',53:'毛毛雨',55:'强毛毛雨',61:'小雨',63:'中雨',65:'大雨',71:'小雪',73:'中雪',75:'大雪',80:'阵雨',81:'强阵雨',82:'暴雨',95:'雷雨',96:'冰雹雷雨',99:'强冰雹雷雨'};
 function weatherText(code){return WEATHER_CODES[code]||'天气未知';}
@@ -1052,7 +1054,11 @@ async function boot(){
   tick();
   // 首次/待配置态默认打开联网页, 否则默认实时数据页
   if(cfg.mode==='provision'||cfg.mode==='setup')tab('net');
-  setViewMode(localStorage.getItem('zhirun-view')==='farm'?'farm':'classic');
+  document.title='智润';
+  $('devName').textContent='智润';
+  $('devSub').textContent='智慧农业水肥一体系统';
+  if($('farmSubTitle'))$('farmSubTitle').textContent='智慧农业水肥一体系统';
+  setViewMode('farm');
 }
 // 轮询: 页面可见时跑, 隐藏时停掉省资源; 回前台立刻补一帧再继续
 let _t={schema:null,tick:null,cfg:null,valve:null,weather:null,recording:null,recordClock:null};

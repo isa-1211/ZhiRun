@@ -29,6 +29,7 @@ static lv_obj_t *weather_label;
 static lv_obj_t *model_label;
 static lv_obj_t *network_label;
 static lv_obj_t *valve_detail_label;
+static unsigned current_page;
 
 #define BOOT_FRAME_FILE "/userdata/zhirun/zhirun_boot_frames.rgb565"
 #define BOOT_AUDIO_FILE "/userdata/zhirun/zhirun_boot_audio.wav"
@@ -260,8 +261,11 @@ static lv_obj_t *make_panel(lv_obj_t *parent, int x, int y, int width, int heigh
     lv_obj_set_style_border_color(panel, lv_color_hex(0x2A3A4F), 0);
     lv_obj_set_style_pad_all(panel, 9, 0);
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_GESTURE_BUBBLE);
     return panel;
 }
+
+static void gesture_page(lv_event_t *event);
 
 static lv_obj_t *make_page(lv_obj_t *parent) {
     lv_obj_t *page = lv_obj_create(parent);
@@ -271,6 +275,8 @@ static lv_obj_t *make_page(lv_obj_t *parent) {
     lv_obj_set_style_border_color(page, lv_color_hex(0x26364C), 0);
     lv_obj_set_style_pad_all(page, 12, 0);
     lv_obj_clear_flag(page, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(page, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_add_event_cb(page, gesture_page, LV_EVENT_GESTURE, NULL);
     return page;
 }
 
@@ -281,12 +287,13 @@ static lv_obj_t *page_text(lv_obj_t *page, const char *text, int x, int y, int w
     lv_obj_set_pos(label, x, y);
     lv_obj_set_style_text_color(label, lv_color_hex(0xDCE6F4), 0);
     lv_obj_set_style_text_line_space(label, 7, 0);
+    lv_obj_add_flag(label, LV_OBJ_FLAG_GESTURE_BUBBLE);
     return label;
 }
 
-static void switch_page(lv_event_t *event) {
-    unsigned selected = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+static void show_page(unsigned selected) {
     if (selected >= 5) return;
+    current_page = selected;
     for (unsigned i = 0; i < 5; i++) {
         if (!pages[i]) continue;
         if (i == selected) lv_obj_clear_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
@@ -294,9 +301,23 @@ static void switch_page(lv_event_t *event) {
     }
 }
 
+static void switch_page(lv_event_t *event) {
+    show_page((unsigned)(uintptr_t)lv_event_get_user_data(event));
+}
+
+static void gesture_page(lv_event_t *event) {
+    (void)event;
+    lv_indev_t *indev = lv_indev_active();
+    if (!indev) return;
+    lv_dir_t direction = lv_indev_get_gesture_dir(indev);
+    if (direction == LV_DIR_LEFT) show_page((current_page + 1) % 5);
+    else if (direction == LV_DIR_RIGHT) show_page((current_page + 4) % 5);
+}
+
 static void build_dashboard(void) {
     lv_obj_t *screen = lv_scr_act();
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x0B1017), 0);
+    lv_obj_add_event_cb(screen, gesture_page, LV_EVENT_GESTURE, NULL);
 
     lv_obj_t *title = lv_label_create(screen);
     lv_label_set_text(title, "ZhiRun");

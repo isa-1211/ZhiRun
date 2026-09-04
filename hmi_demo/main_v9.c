@@ -1,4 +1,6 @@
 #include <lvgl/lvgl.h>
+#include <lvgl/src/widgets/keyboard/lv_keyboard.h>
+#include <lvgl/src/widgets/textarea/lv_textarea.h>
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <netdb.h>
@@ -28,6 +30,13 @@ static lv_obj_t *pages[5];
 static lv_obj_t *weather_label;
 static lv_obj_t *model_label;
 static lv_obj_t *network_label;
+static lv_obj_t *wifi_scan_label;
+static lv_obj_t *wifi_ssid_input;
+static lv_obj_t *wifi_password_input;
+static lv_obj_t *wifi_keyboard;
+static bool wifi_scan_active;
+static bool wifi_connect_active;
+static uint32_t wifi_connect_start_tick;
 static lv_obj_t *valve_detail_label;
 /* N / P / K dosing pumps and the mixing-tank outlet pump, in that order. */
 static lv_obj_t *pump_state_labels[4];
@@ -43,11 +52,216 @@ static unsigned current_page;
 #define BOOT_FRAME_INTERVAL_MS 333
 #define BOOT_DURATION_MS 6000
 
+#define WIFI_SCAN_FILE "/tmp/zhirun_hmi_wifi_scan.txt"
+#define WIFI_SCAN_STATUS_FILE "/tmp/zhirun_hmi_wifi_scan.status"
+#define WIFI_CONNECT_STATUS_FILE "/tmp/zhirun_hmi_wifi_connect.status"
+
 static uint8_t *boot_frame_data;
 static lv_image_dsc_t boot_frame_dsc;
 static FILE *boot_frame_file;
 static uint32_t boot_frame_index;
 static uint32_t boot_start_tick;
+
+static void write_status_file(const char *path, const char *text) {
+    FILE *file = fopen(path, "w");
+    if (!file) return;
+    fputs(text, file);
+    fputc('\n', file);
+    fclose(file);
+}
+
+static void shell_quote(const char *input, char *output, size_t cap) {
+    size_t used = 0;
+    if (cap == 0) return;
+    output[used++] = '\'';
+    for (const char *cursor = input; *cursor && used + 5 < cap; cursor++) {
+        if (*cursor == '\'') {
+            memcpy(output + used, "'\\''", 4);
+            used += 4;
+        } else {
+            output[used++] = *cursor;
+        }
+    }
+    if (used + 1 < cap) output[used++] = '\'';
+    output[used] = 0;
+}
+
+static void wifi_scan_start(lv_event_t *event) {
+    (void)event;
+    if (wifi_scan_active) return;
+    unlink(WIFI_SCAN_FILE);
+    unlink(WIFI_SCAN_STATUS_FILE);
+    pid_t child = fork();
+    if (child < 0) {
+        lv_label_set_text(wifi_scan_label, "Wi-Fi scan could not start");
+        return;
+    }
+    if (child == 0) {
+        int result = system("wpa_cli -i wlan0 scan >/dev/null 2>&1; sleep 3; "
+                            "wpa_cli -i wlan0 scan_results > " WIFI_SCAN_FILE " 2>/dev/null");
+        write_status_file(WIFI_SCAN_STATUS_FILE, result == 0 ? "done" : "failed");
+        _exit(result == 0 ? 0 : 1);
+    }
+    wifi_scan_active = true;
+    lv_label_set_text(wifi_scan_label, "Scanning nearby Wi-Fi...");
+}
+
+static void wifi_scan_poll(void) {
+    if (!wifi_scan_active || access(WIFI_SCAN_STATUS_FILE, F_OK) != 0) return;
+    FILE *status = fopen(WIFI_SCAN_STATUS_FILE, "r");
+    char state[16] = "failed";
+    if (status) {
+        fgets(state, sizeof(state), status);
+        fclose(status);
+    }
+    wifi_scan_active = false;
+    if (strncmp(state, "done", 4) != 0) {
+        lv_label_set_text(wifi_scan_label, "Wi-Fi scan failed");
+        return;
+    }
+    FILE *results = fopen(WIFI_SCAN_FILE, "r");
+    if (!results) {
+        lv_label_set_text(wifi_scan_label, "No Wi-Fi networks found");
+        return;
+    }
+    char text[1200] = "Nearby networks:\n";
+    size_t used = strlen(text);
+    char line[320];
+    unsigned count = 0;
+    while (fgets(line, sizeof(line), results) && count < 12) {
+        if (strncmp(line, "bssid /", 7) == 0 || strncmp(line, "Selected", 8) == 0) continue;
+        char *ssid = strrchr(line, '\t');
+        if (!ssid) continue;
+        ssid++;
+        ssid[strcspn(ssid, "\r\n")] = 0;
+        if (!*ssid) continue;
+        int added = snprintf(text + used, sizeof(text) - used, "%u. %s\n", ++count, ssid);
+        if (added < 0 || (size_t)added >= sizeof(text) - used) break;
+        used += (size_t)added;
+    }
+    fclose(results);
+    if (count == 0) strcpy(text, "No Wi-Fi networks found");
+    lv_label_set_text(wifi_scan_label, text);
+}
+
+static int run_wpa_value(const char *id, const char *key, const char *value) {
+    char quoted[320], command[520], value_with_quotes[260];
+    snprintf(value_with_quotes, sizeof(value_with_quotes), "\"%s\"", value);
+    shell_quote(value_with_quotes, quoted, sizeof(quoted));
+    snprintf(command, sizeof(command), "wpa_cli -i wlan0 set_network %s %s %s >/dev/null 2>&1",
+             id, key, quoted);
+    return system(command);
+}
+
+static void wifi_connect_start(lv_event_t *event) {
+    (void)event;
+    if (wifi_connect_active) return;
+    const char *ssid = lv_textarea_get_text(wifi_ssid_input);
+    const char *password = lv_textarea_get_text(wifi_password_input);
+    if (!ssid || !*ssid) {
+        lv_label_set_text(wifi_scan_label, "Enter an SSID first");
+        return;
+    }
+    char ssid_copy[160], password_copy[160];
+    snprintf(ssid_copy, sizeof(ssid_copy), "%s", ssid);
+    snprintf(password_copy, sizeof(password_copy), "%s", password ? password : "");
+    unlink(WIFI_CONNECT_STATUS_FILE);
+    pid_t child = fork();
+    if (child < 0) {
+        lv_label_set_text(wifi_scan_label, "Wi-Fi connection could not start");
+        return;
+    }
+    if (child == 0) {
+        char quoted_ssid[360], command[520], id[32] = "";
+        char ssid_value[190];
+        snprintf(ssid_value, sizeof(ssid_value), "\"%s\"", ssid_copy);
+        shell_quote(ssid_value, quoted_ssid, sizeof(quoted_ssid));
+        FILE *networks = popen("wpa_cli -i wlan0 add_network 2>/dev/null", "r");
+        if (networks) {
+            fgets(id, sizeof(id), networks);
+            pclose(networks);
+        }
+        id[strcspn(id, "\r\n")] = 0;
+        if (!*id || !isdigit((unsigned char)id[0]) ||
+            run_wpa_value(id, "ssid", ssid_copy) != 0) {
+            write_status_file(WIFI_CONNECT_STATUS_FILE, "failed");
+            _exit(1);
+        }
+        if (*password_copy) {
+            if (run_wpa_value(id, "psk", password_copy) != 0) {
+                write_status_file(WIFI_CONNECT_STATUS_FILE, "failed");
+                _exit(1);
+            }
+        } else {
+            snprintf(command, sizeof(command),
+                     "wpa_cli -i wlan0 set_network %s key_mgmt NONE >/dev/null 2>&1", id);
+            if (system(command) != 0) {
+                write_status_file(WIFI_CONNECT_STATUS_FILE, "failed");
+                _exit(1);
+            }
+        }
+        snprintf(command, sizeof(command),
+                 "wpa_cli -i wlan0 set_network %s scan_ssid 1 >/dev/null 2>&1; "
+                 "wpa_cli -i wlan0 enable_network %s >/dev/null 2>&1; "
+                 "wpa_cli -i wlan0 select_network %s >/dev/null 2>&1; "
+                 "wpa_cli -i wlan0 save_config >/dev/null 2>&1; "
+                 "ip link set wlan0 up >/dev/null 2>&1; dhcpcd wlan0 >/dev/null 2>&1",
+                 id, id, id);
+        int result = system(command);
+        write_status_file(WIFI_CONNECT_STATUS_FILE, result == 0 ? "connecting" : "failed");
+        _exit(result == 0 ? 0 : 1);
+    }
+    wifi_connect_active = true;
+    wifi_connect_start_tick = lv_tick_get();
+    lv_label_set_text(wifi_scan_label, "Wi-Fi configuration sent; waiting for association...");
+}
+
+static void wifi_input_event(lv_event_t *event) {
+    if (!wifi_keyboard) return;
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_FOCUSED) {
+        lv_keyboard_set_textarea(wifi_keyboard, lv_event_get_target(event));
+        lv_obj_clear_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
+    } else if (code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
+        lv_obj_add_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void wifi_local_status(void) {
+    FILE *pipe = popen("wpa_cli -i wlan0 status 2>/dev/null", "r");
+    char line[220], ssid[160] = "", state[32] = "";
+    if (pipe) {
+        while (fgets(line, sizeof(line), pipe)) {
+            if (strncmp(line, "ssid=", 5) == 0) snprintf(ssid, sizeof(ssid), "%s", line + 5);
+            else if (strncmp(line, "wpa_state=", 10) == 0) snprintf(state, sizeof(state), "%s", line + 10);
+        }
+        pclose(pipe);
+    }
+    ssid[strcspn(ssid, "\r\n")] = 0;
+    state[strcspn(state, "\r\n")] = 0;
+    char text[320];
+    snprintf(text, sizeof(text), "Local Wi-Fi: %s\nState: %s\nOffline setup works without the server",
+             *ssid ? ssid : "not connected", *state ? state : "unavailable");
+    if (network_label) lv_label_set_text(network_label, text);
+    if (wifi_connect_active) {
+        bool child_failed = false;
+        FILE *connect_status = fopen(WIFI_CONNECT_STATUS_FILE, "r");
+        if (connect_status) {
+            char connect_state[24] = "";
+            fgets(connect_state, sizeof(connect_state), connect_status);
+            fclose(connect_status);
+            child_failed = strncmp(connect_state, "failed", 6) == 0;
+        }
+        if (strcmp(state, "COMPLETED") == 0) {
+            wifi_connect_active = false;
+            lv_label_set_text(wifi_scan_label, "Wi-Fi connected successfully");
+        } else if (child_failed || lv_tick_elaps(wifi_connect_start_tick) > 60000) {
+            wifi_connect_active = false;
+            lv_label_set_text(wifi_scan_label, "Wi-Fi connection failed; check password");
+        }
+    }
+    wifi_scan_poll();
+}
 
 static void start_boot_audio(void) {
     pid_t child = fork();
@@ -170,6 +384,8 @@ static void refresh(lv_timer_t *timer) {
     char response[4096], device[64] = "unknown", source[32] = "unknown";
     double values[13] = {0}, age;
 
+    wifi_local_status();
+
     if (request("GET", "/data", NULL, response, sizeof(response)) != 0) {
         fprintf(stderr, "HMI_REFRESH data_request_failed\n");
         lv_label_set_text(status_label, "Device offline");
@@ -248,7 +464,7 @@ static void refresh(lv_timer_t *timer) {
         }
     }
     if (network_label) {
-        char network_text[160];
+        char network_text[320];
         snprintf(network_text, sizeof(network_text), "Server: http://%s:%d\nWi-Fi or Ethernet supported\nUSB insertion order is independent",
                  HMI_SERVER_HOST, HMI_SERVER_PORT);
         lv_label_set_text(network_label, network_text);
@@ -475,7 +691,48 @@ static void build_dashboard(void) {
     valve_detail_label = page_text(pages[2], "Waiting for valve status", 7, 337, 733);
     weather_label = page_text(pages[1], "Waiting for environment data", 7, 7, 740);
     model_label = page_text(pages[3], "Model: server\nExtraTrees multi-output policy\nDaily 12:00 automatic run", 7, 7, 740);
-    network_label = page_text(pages[4], "Waiting for network status", 7, 7, 740);
+    network_label = page_text(pages[4], "Local Wi-Fi: checking...", 7, 7, 740);
+
+    wifi_ssid_input = lv_textarea_create(pages[4]);
+    lv_obj_set_pos(wifi_ssid_input, 7, 72);
+    lv_obj_set_size(wifi_ssid_input, 260, 42);
+    lv_textarea_set_one_line(wifi_ssid_input, true);
+    lv_textarea_set_placeholder_text(wifi_ssid_input, "SSID");
+    lv_obj_add_event_cb(wifi_ssid_input, wifi_input_event, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(wifi_ssid_input, wifi_input_event, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(wifi_ssid_input, wifi_input_event, LV_EVENT_CANCEL, NULL);
+
+    wifi_password_input = lv_textarea_create(pages[4]);
+    lv_obj_set_pos(wifi_password_input, 280, 72);
+    lv_obj_set_size(wifi_password_input, 260, 42);
+    lv_textarea_set_one_line(wifi_password_input, true);
+    lv_textarea_set_password_mode(wifi_password_input, true);
+    lv_textarea_set_placeholder_text(wifi_password_input, "Password (empty for open Wi-Fi)");
+    lv_obj_add_event_cb(wifi_password_input, wifi_input_event, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(wifi_password_input, wifi_input_event, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(wifi_password_input, wifi_input_event, LV_EVENT_CANCEL, NULL);
+
+    lv_obj_t *scan_button = lv_btn_create(pages[4]);
+    lv_obj_set_pos(scan_button, 555, 72);
+    lv_obj_set_size(scan_button, 105, 42);
+    lv_obj_add_event_cb(scan_button, wifi_scan_start, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *scan_button_label = lv_label_create(scan_button);
+    lv_label_set_text(scan_button_label, "SCAN");
+    lv_obj_center(scan_button_label);
+
+    lv_obj_t *connect_button = lv_btn_create(pages[4]);
+    lv_obj_set_pos(connect_button, 668, 72);
+    lv_obj_set_size(connect_button, 105, 42);
+    lv_obj_add_event_cb(connect_button, wifi_connect_start, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *connect_button_label = lv_label_create(connect_button);
+    lv_label_set_text(connect_button_label, "CONNECT");
+    lv_obj_center(connect_button_label);
+
+    wifi_scan_label = page_text(pages[4], "Tap SCAN to list nearby networks", 7, 132, 760);
+    wifi_keyboard = lv_keyboard_create(screen);
+    lv_obj_set_size(wifi_keyboard, 800, 180);
+    lv_obj_set_pos(wifi_keyboard, 0, 300);
+    lv_obj_add_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
 
     source_label = lv_label_create(screen);
     lv_label_set_text(source_label, "Waiting for server data");

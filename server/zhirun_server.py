@@ -402,7 +402,15 @@ def valve_snapshot(device_id):
     if attempt:
         elapsed = now() - attempt["started_at"]
         connected_ssid = state.get("wifiSsid") if state.get("wifiConnected") else ""
-        if connected_ssid == attempt["ssid"]:
+        command_matches = str(state.get("lastCommandId") or "") == str(attempt.get("command_id") or "")
+        portal_ready = not attempt.get("campus") or state.get("portalAuthenticated") is True
+        if command_matches and state.get("networkConfigStatus") == "failed":
+            state["networkAttempt"] = {
+                "status": "failed",
+                "ssid": attempt["ssid"],
+                "message": state.get("portalMessage") or "network_config_failed",
+            }
+        elif connected_ssid == attempt["ssid"] and portal_ready:
             state["networkAttempt"] = {"status": "success", "ssid": attempt["ssid"]}
             _network_attempt_by_device.pop(device_id, None)
         elif elapsed >= 90:
@@ -1160,15 +1168,32 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/network/config":
             ssid = obj.get("ssid")
             password = obj.get("password")
+            campus = obj.get("campus") is True
             if not isinstance(ssid, str) or not ssid.strip() or len(ssid) > 64:
                 self.send_json(400, {"ok": False, "message": "bad_ssid"})
                 return
             if not isinstance(password, str) or len(password) > 128:
                 self.send_json(400, {"ok": False, "message": "bad_password"})
                 return
+            campus_username = obj.get("campus_username")
+            campus_password = obj.get("campus_password")
+            if campus and (
+                not isinstance(campus_username, str) or not campus_username.strip()
+                or len(campus_username) > 128
+                or not isinstance(campus_password, str) or not campus_password
+                or len(campus_password) > 256
+            ):
+                self.send_json(400, {"ok": False, "message": "bad_campus_credentials"})
+                return
             with _lock:
                 device_id = current_device_id()
-                params = {"ssid": ssid.strip(), "password": password}
+                params = {"ssid": ssid.strip(), "password": password, "campus": campus}
+                if campus:
+                    params.update({
+                        "campus_username": campus_username.strip(),
+                        "campus_password": campus_password,
+                        "campus_ac_id": "6",
+                    })
                 for key, limit in (("radio", 8), ("auth", 32), ("bssid", 32)):
                     value = obj.get(key)
                     if isinstance(value, str) and len(value) <= limit:
@@ -1178,8 +1203,13 @@ class Handler(BaseHTTPRequestHandler):
                     params["device_name"] = name.strip()[:96]
                 command = queue_valve_command(device_id, "network_config", params)
                 if command:
-                    # 只记录目标网络名和开始时间，密码始终仅存在待执行命令内存中。
-                    _network_attempt_by_device[device_id] = {"ssid": ssid.strip(), "started_at": now()}
+                    # 密码始终仅存在待执行命令内存中，不写服务器状态文件。
+                    _network_attempt_by_device[device_id] = {
+                        "ssid": ssid.strip(),
+                        "started_at": now(),
+                        "campus": campus,
+                        "command_id": command["id"],
+                    }
             if not command:
                 self.send_json(503, {"ok": False, "message": "serial_device_offline"})
                 return

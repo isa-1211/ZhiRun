@@ -8,10 +8,15 @@ ESP32 over USB serial.  It intentionally uses only the Python standard
 library so it fits the Buildroot image on the RK3506B board.
 """
 import argparse
+import base64
+import hashlib
+import hmac
 import json
 import os
 import select
+import shutil
 import socket
+import ssl
 import subprocess
 import termios
 import time
@@ -47,6 +52,12 @@ DEFAULTS = {
 
 SPEEDS = {2400: termios.B2400, 4800: termios.B4800, 9600: termios.B9600,
           19200: termios.B19200, 38400: termios.B38400, 115200: termios.B115200}
+
+CAMPUS_PROFILE = Path("/userdata/zhirun-campus.json")
+SRUN_BASE = "https://login.imau.edu.cn"
+SRUN_AC_ID = "6"
+SRUN_BASE64_ALPHABET = "LVoJPiCN2R8G90yg+hmFHuacZ1OWMnrsSTXkYpUq/3dlbfKwv6xztjI7DeBE45QA"
+STANDARD_BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 
 def load_config(path):
@@ -381,6 +392,339 @@ def request_json(url, value=None, timeout=5):
         return json.loads(response.read().decode("utf-8"))
 
 
+def _srun_words(value, include_length):
+    raw = value.encode("utf-8")
+    words = [int.from_bytes(raw[index:index + 4].ljust(4, b"\0"), "little")
+             for index in range(0, len(raw), 4)]
+    if include_length:
+        words.append(len(raw))
+    return words
+
+
+def _srun_xencode(value, token):
+    """SRun's XXTEA-compatible encoder, returned as raw little-endian bytes."""
+    if not value:
+        return b""
+    values = _srun_words(value, True)
+    key = (_srun_words(token, False) + [0, 0, 0, 0])[:4]
+    count = len(values) - 1
+    z = values[count]
+    total = 0
+    rounds = 6 + 52 // (count + 1)
+    while rounds:
+        total = (total + 0x9E3779B9) & 0xFFFFFFFF
+        e = (total >> 2) & 3
+        for position in range(count):
+            y = values[position + 1]
+            mixed = (((z >> 5) ^ (y << 2)) + ((y >> 3) ^ (z << 4))) \
+                ^ ((total ^ y) + (key[(position & 3) ^ e] ^ z))
+            values[position] = (values[position] + mixed) & 0xFFFFFFFF
+            z = values[position]
+        y = values[0]
+        mixed = (((z >> 5) ^ (y << 2)) + ((y >> 3) ^ (z << 4))) \
+            ^ ((total ^ y) + (key[(count & 3) ^ e] ^ z))
+        values[count] = (values[count] + mixed) & 0xFFFFFFFF
+        z = values[count]
+        rounds -= 1
+    return b"".join(word.to_bytes(4, "little") for word in values)
+
+
+def _srun_base64(raw):
+    encoded = base64.b64encode(raw).decode("ascii")
+    return encoded.translate(str.maketrans(STANDARD_BASE64_ALPHABET, SRUN_BASE64_ALPHABET))
+
+
+def _jsonp(value):
+    value = value.decode("utf-8", "replace").strip()
+    if value.startswith("{"):
+        return json.loads(value)
+    start, end = value.find("("), value.rfind(")")
+    if start < 0 or end <= start:
+        raise ValueError("invalid portal response")
+    return json.loads(value[start + 1:end])
+
+
+def _srun_request(path, params, timeout=12):
+    callback = "zhirun_%d" % int(time.time() * 1000)
+    values = dict(params)
+    values.update({"callback": callback, "_": str(int(time.time() * 1000))})
+    request = Request(
+        SRUN_BASE + path + "?" + urlencode(values),
+        headers={"Accept": "application/json", "User-Agent": "ZhiRun-RK3506B/1.0"},
+    )
+    context = ssl._create_unverified_context()
+    with urlopen(request, timeout=timeout, context=context) as response:
+        return _jsonp(response.read())
+
+
+def srun_login(username, password, ip_address, ac_id=SRUN_AC_ID):
+    challenge = _srun_request("/cgi-bin/get_challenge", {
+        "username": username,
+        "ip": ip_address,
+    }).get("challenge")
+    if not challenge:
+        return {"ok": False, "message": "challenge_failed"}
+
+    hmd5 = hmac.new(challenge.encode(), password.encode(), hashlib.md5).hexdigest()
+    info_value = json.dumps({
+        "username": username,
+        "password": password,
+        "ip": ip_address,
+        "acid": str(ac_id),
+        "enc_ver": "srun_bx1",
+    }, ensure_ascii=False, separators=(",", ":"))
+    info = "{SRBX1}" + _srun_base64(_srun_xencode(info_value, challenge))
+    checksum_source = "".join((
+        challenge, username,
+        challenge, hmd5,
+        challenge, str(ac_id),
+        challenge, ip_address,
+        challenge, "200",
+        challenge, "1",
+        challenge, info,
+    ))
+    result = _srun_request("/cgi-bin/srun_portal", {
+        "action": "login",
+        "username": username,
+        "password": "{MD5}" + hmd5,
+        "os": "Linux",
+        "name": "Linux",
+        "double_stack": "0",
+        "chksum": hashlib.sha1(checksum_source.encode()).hexdigest(),
+        "info": info,
+        "ac_id": str(ac_id),
+        "ip": ip_address,
+        "n": "200",
+        "type": "1",
+    })
+    ok = result.get("error") == "ok" or result.get("res") == "ok"
+    message = result.get("suc_msg") or result.get("error_msg") or result.get("error") or "unknown"
+    return {"ok": ok, "message": str(message)[:160]}
+
+
+def wifi_status(interface="wlan0"):
+    try:
+        output = subprocess.check_output(
+            ["wpa_cli", "-i", interface, "status"],
+            stderr=subprocess.DEVNULL, text=True, timeout=3,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    return dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
+
+
+def public_network_available(server):
+    try:
+        request = Request(server.rstrip("/") + "/data", headers={"Accept": "application/json"})
+        with urlopen(request, timeout=4) as response:
+            return response.status == 200 and "application/json" in response.headers.get("Content-Type", "")
+    except (OSError, ValueError):
+        return False
+
+
+def renew_wifi_lease(interface="wlan0"):
+    try:
+        subprocess.run(["dhcpcd", "-k", interface], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, timeout=8, check=False)
+        subprocess.run(["ip", "addr", "flush", "dev", interface, "scope", "global"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=5, check=False)
+        lease = subprocess.run(
+            ["udhcpc", "-i", interface, "-n", "-q", "-t", "10", "-T", "2"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=30, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    status = wifi_status(interface)
+    return status.get("ip_address", "") if lease.returncode == 0 else ""
+
+
+def _wpa(interface, *args):
+    result = subprocess.run(
+        ["wpa_cli", "-i", interface] + list(args),
+        capture_output=True, text=True, timeout=6,
+    )
+    output = result.stdout.strip()
+    if result.returncode or output.splitlines()[-1:] == ["FAIL"]:
+        raise OSError("wpa_cli failed: %s" % " ".join(args[:2]))
+    return output
+
+
+def _current_network_id(interface="wlan0"):
+    current = wifi_status(interface).get("ssid", "")
+    if not current:
+        return None
+    for line in _wpa(interface, "list_networks").splitlines()[1:]:
+        fields = line.split("\t")
+        if len(fields) >= 2 and fields[1] == current and "CURRENT" in line:
+            return fields[0]
+    return None
+
+
+def _persist_wifi_config():
+    source = Path("/etc/wpa_supplicant.conf")
+    destination = Path("/userdata/zhirun-wpa.conf")
+    if source.exists():
+        shutil.copyfile(str(source), str(destination))
+        os.chmod(str(destination), 0o600)
+
+
+def save_campus_profile(profile):
+    temporary = CAMPUS_PROFILE.with_suffix(".tmp")
+    temporary.write_text(json.dumps(profile, ensure_ascii=False), encoding="utf-8")
+    os.chmod(str(temporary), 0o600)
+    os.replace(str(temporary), str(CAMPUS_PROFILE))
+
+
+def load_campus_profile():
+    try:
+        value = json.loads(CAMPUS_PROFILE.read_text(encoding="utf-8"))
+        if all(isinstance(value.get(key), str) and value.get(key)
+               for key in ("ssid", "username", "password")):
+            return value
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def configure_network(command, server, interface="wlan0"):
+    ssid = str(command.get("ssid") or "").strip()
+    password = str(command.get("password") or "")
+    campus = bool(command.get("campus"))
+    previous_status = wifi_status(interface)
+    previous_ssid = previous_status.get("ssid", "")
+    previous_id = _current_network_id(interface)
+    candidate_id = None
+    try:
+        candidate_id = _wpa(interface, "add_network").splitlines()[-1]
+        _wpa(interface, "set_network", candidate_id, "ssid",
+             json.dumps(ssid, ensure_ascii=False))
+        if password:
+            _wpa(interface, "set_network", candidate_id, "psk",
+                 json.dumps(password, ensure_ascii=False))
+        else:
+            _wpa(interface, "set_network", candidate_id, "key_mgmt", "NONE")
+        _wpa(interface, "set_network", candidate_id, "scan_ssid", "1")
+        _wpa(interface, "set_network", candidate_id, "priority", "20")
+        _wpa(interface, "select_network", candidate_id)
+
+        for _ in range(35):
+            time.sleep(1)
+            status = wifi_status(interface)
+            if status.get("wpa_state") == "COMPLETED" and status.get("ssid") == ssid:
+                break
+        else:
+            raise OSError("association_timeout")
+
+        ip_address = renew_wifi_lease(interface)
+        if not ip_address:
+            raise OSError("dhcp_failed")
+
+        portal_result = {"ok": True, "message": "not_required"}
+        if campus:
+            username = str(command.get("campus_username") or "").strip()
+            campus_password = str(command.get("campus_password") or "")
+            if not username or not campus_password:
+                raise ValueError("campus_credentials_required")
+            portal_result = srun_login(username, campus_password, ip_address,
+                                       str(command.get("campus_ac_id") or SRUN_AC_ID))
+            if not portal_result["ok"]:
+                raise OSError("portal_%s" % portal_result["message"])
+            save_campus_profile({
+                "ssid": ssid,
+                "username": username,
+                "password": campus_password,
+                "ac_id": str(command.get("campus_ac_id") or SRUN_AC_ID),
+            })
+
+        if not public_network_available(server):
+            raise OSError("public_network_unavailable")
+        if previous_id is not None and previous_id != candidate_id:
+            if previous_ssid == ssid:
+                _wpa(interface, "remove_network", previous_id)
+            else:
+                _wpa(interface, "set_network", previous_id, "priority", "10")
+                _wpa(interface, "enable_network", previous_id)
+        _wpa(interface, "save_config")
+        _persist_wifi_config()
+        return {
+            "wifiConnected": True,
+            "wifiSsid": ssid,
+            "portalRequired": campus,
+            "portalAuthenticated": True if campus else None,
+            "portalStatus": "authenticated" if campus else "not_required",
+            "portalMessage": portal_result["message"],
+            "networkConfigStatus": "success",
+            "lastCommandId": str(command.get("id") or ""),
+        }
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        if candidate_id is not None:
+            try:
+                _wpa(interface, "remove_network", candidate_id)
+            except OSError:
+                pass
+        if previous_id is not None:
+            try:
+                _wpa(interface, "select_network", previous_id)
+                for _ in range(20):
+                    time.sleep(1)
+                    if wifi_status(interface).get("wpa_state") == "COMPLETED":
+                        break
+                renew_wifi_lease(interface)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        return {
+            "portalRequired": campus,
+            "portalAuthenticated": False if campus else None,
+            "portalStatus": "failed" if campus else "not_required",
+            "portalMessage": str(exc)[:160],
+            "networkConfigStatus": "failed",
+            "networkConfigSsid": ssid,
+            "lastCommandId": str(command.get("id") or ""),
+        }
+
+
+def refresh_campus_session(server, interface="wlan0"):
+    profile = load_campus_profile()
+    status = wifi_status(interface)
+    if not profile or status.get("ssid") != profile.get("ssid"):
+        return {
+            "portalRequired": False,
+            "portalAuthenticated": None,
+            "portalStatus": "not_required",
+        }
+    if public_network_available(server):
+        return {
+            "portalRequired": True,
+            "portalAuthenticated": True,
+            "portalStatus": "authenticated",
+        }
+    ip_address = status.get("ip_address") or renew_wifi_lease(interface)
+    if not ip_address:
+        return {
+            "portalRequired": True,
+            "portalAuthenticated": False,
+            "portalStatus": "dhcp_failed",
+        }
+    try:
+        result = srun_login(profile["username"], profile["password"], ip_address,
+                            profile.get("ac_id", SRUN_AC_ID))
+        return {
+            "portalRequired": True,
+            "portalAuthenticated": bool(result["ok"]),
+            "portalStatus": "authenticated" if result["ok"] else "failed",
+            "portalMessage": result["message"],
+        }
+    except (OSError, ValueError) as exc:
+        return {
+            "portalRequired": True,
+            "portalAuthenticated": False,
+            "portalStatus": "failed",
+            "portalMessage": str(exc)[:160],
+        }
+
+
 def network_snapshot(server):
     result = {"networkType": None, "networkInterface": None, "networkIp": None,
               "networkGateway": None, "networkConnected": False,
@@ -479,7 +823,9 @@ def main():
     esp = None
     last_push = 0.0
     last_poll = 0.0
+    last_campus_check = 0.0
     last_error = ""
+    network_state = {}
     try:
         bus = Modbus(config)
         esp = Esp32Link(config)
@@ -488,6 +834,9 @@ def main():
         while True:
             now = time.monotonic()
             esp.poll()
+            if now - last_campus_check >= 30.0:
+                last_campus_check = now
+                network_state.update(refresh_campus_session(server))
             if esp.connected and now - last_poll >= float_value(config, "ZHIRUN_POLL_INTERVAL_S"):
                 last_poll = now
                 try:
@@ -505,6 +854,12 @@ def main():
                         })
                         state_url = server + "/api/devices/%s/valve/result" % quote(device_id, safe="")
                         request_json(state_url, {"token": config["ZHIRUN_TOKEN"], "state": state}, timeout=5)
+                    elif command.get("action") == "network_config":
+                        network_state = configure_network(command, server)
+                        state = dict(esp.state)
+                        state.update(network_state)
+                        state_url = server + "/api/devices/%s/valve/result" % quote(device_id, safe="")
+                        request_json(state_url, {"token": config["ZHIRUN_TOKEN"], "state": state}, timeout=5)
                     elif command and not esp.send({"command": command}):
                         raise OSError("ESP32 serial link lost before command send")
                 except (OSError, ValueError) as exc:
@@ -514,6 +869,7 @@ def main():
                 try:
                     payload = read_sensors(config, bus)
                     payload.update(network_snapshot(server))
+                    payload.update(network_state)
                     payload.update({"esp32": esp.snapshot(), "collectorError": last_error})
                     if "rainMm" not in payload and "rainMm" in esp.state:
                         payload["rainMm"] = esp.state["rainMm"]
@@ -527,7 +883,9 @@ def main():
                     request_json(server + "/push", envelope, timeout=5)
                     if esp.state:
                         state_url = server + "/api/devices/%s/valve/result" % quote(device_id, safe="")
-                        request_json(state_url, {"token": config["ZHIRUN_TOKEN"], "state": esp.state}, timeout=3)
+                        state = dict(esp.state)
+                        state.update(network_state)
+                        request_json(state_url, {"token": config["ZHIRUN_TOKEN"], "state": state}, timeout=3)
                     last_error = ""
                 except (OSError, ValueError) as exc:
                     last_error = "sensor: %s" % exc

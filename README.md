@@ -59,12 +59,26 @@ Verify the runtime route with:
 
 ```bash
 ip route get 8.145.49.45
-curl --interface eth0 -I http://8.145.49.45/
+wget -qO- http://8.145.49.45/data
 ```
 
 The RK3506B image uses BusyBox init rather than systemd. Keep the board's
-static Ethernet address and confirm that `ip route get 8.145.49.45` selects
-`eth0` before enabling automatic collection.
+static Ethernet address for local management, and confirm that public traffic
+selects `wlan0`. The Ethernet interface must not install the public default
+route.
+
+## Campus Wi-Fi
+
+The network page recognizes the open `IMAU` SSID as the Inner Mongolia
+Agricultural University captive network. Select `IMAU`, enter the campus
+account and authentication password, and choose **认证连接**. The RK3506B
+obtains a fresh DHCP lease and completes the school's SRun Portal login with
+`ac_id=6`. It checks the public connection every 30 seconds and automatically
+authenticates again after a Wi-Fi or Portal session drop.
+
+Campus credentials are never persisted by the public server. The board stores
+the active campus profile at `/userdata/zhirun-campus.json` with mode `0600` so
+it can recover after reboot.
 
 ## Security
 

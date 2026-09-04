@@ -128,6 +128,61 @@ def now():
     return int(time.time())
 
 
+def queue_farm_assessment(device_id, latest):
+    """Return a cached assessment and refresh it in the background.
+
+    The dashboard consumes this through the existing /data response. Keeping
+    model inference off the request path preserves the real-time data cadence.
+    """
+    if not device_id or not latest:
+        return {"ok": False, "reason": "no_device_data"}
+    with _lock:
+        cached = dict(_farm_assessment_cache.get(device_id, {}))
+        response = dict(cached.get("response", {}))
+        fresh = response and now() - int(cached.get("cached_at", 0)) < 60
+        if fresh:
+            response["cached"] = True
+            return response
+        if cached.get("inflight"):
+            return response or {"ok": False, "reason": "calculating"}
+        _farm_assessment_cache[device_id] = {**cached, "inflight": True}
+
+    payload = dict(latest)
+    payload.update({
+        "n_concentration_g_l": AUTO_MODEL_N_CONCENTRATION,
+        "p_concentration_g_l": AUTO_MODEL_P_CONCENTRATION,
+        "k_concentration_g_l": AUTO_MODEL_K_CONCENTRATION,
+    })
+
+    def refresh():
+        try:
+            request = Request(
+                FERTIGATION_URL + "/assessment",
+                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+            with urlopen(request, timeout=30) as result:
+                response = json.loads(result.read().decode("utf-8"))
+            response.update({
+                "device_id": device_id,
+                "frame_sequence": latest.get("_frameSeq"),
+                "frame_timestamp": latest.get("_ts"),
+                "cached": False,
+            })
+            entry = {"cached_at": now(), "response": response, "inflight": False}
+        except Exception as exc:
+            entry = {
+                "cached_at": now(),
+                "response": {"ok": False, "reason": "assessment_service_unavailable", "message": str(exc)},
+                "inflight": False,
+            }
+        with _lock:
+            _farm_assessment_cache[device_id] = entry
+
+    threading.Thread(target=refresh, name="farm-assessment", daemon=True).start()
+    return response or {"ok": False, "reason": "calculating"}
+
+
 def json_bytes(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
@@ -838,51 +893,8 @@ class Handler(BaseHTTPRequestHandler):
             data["_age"] = latest_age(data)
             with _lock:
                 data["auto_model"] = dict(_auto_model_state)
+            data["farm_assessment"] = queue_farm_assessment(device_id, data)
             self.send_json(200, data)
-            return
-
-        if path == "/farm/assessment":
-            requested_device_id = query.get("device_id", [None])[0]
-            with _lock:
-                device_id = current_device_id(requested_device_id)
-                latest = dict(_latest_by_device.get(device_id, {})) if device_id else {}
-                cached = dict(_farm_assessment_cache.get(device_id, {})) if device_id else {}
-            if not latest:
-                self.send_json(200, {"ok": False, "reason": "no_device_data"})
-                return
-            # Assessment requests use the same model as the work-order page.
-            # Cache for one minute so dashboard polling never turns into a
-            # stream of weather/model jobs.
-            if (cached.get("response")
-                    and cached.get("frame_sequence") == latest.get("_frameSeq")
-                    and now() - int(cached.get("cached_at", 0)) < 60):
-                response = dict(cached["response"])
-                response["cached"] = True
-                self.send_json(200, response)
-                return
-            payload = dict(latest)
-            payload.update({
-                "n_concentration_g_l": AUTO_MODEL_N_CONCENTRATION,
-                "p_concentration_g_l": AUTO_MODEL_P_CONCENTRATION,
-                "k_concentration_g_l": AUTO_MODEL_K_CONCENTRATION,
-            })
-            try:
-                request = Request(FERTIGATION_URL + "/assessment", data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                                  headers={"Content-Type": "application/json"}, method="POST")
-                with urlopen(request, timeout=30) as result:
-                    response = json.loads(result.read().decode("utf-8"))
-                response["device_id"] = device_id
-                response["frame_sequence"] = latest.get("_frameSeq")
-                response["frame_timestamp"] = latest.get("_ts")
-                response["cached"] = False
-                with _lock:
-                    _farm_assessment_cache[device_id] = {
-                        "cached_at": now(), "frame_sequence": latest.get("_frameSeq"),
-                        "response": dict(response),
-                    }
-                self.send_json(200, response)
-            except Exception as exc:
-                self.send_json(502, {"ok": False, "reason": "assessment_service_unavailable", "message": str(exc)})
             return
 
         if path == "/fertigation/auto/status":

@@ -68,5 +68,64 @@ class SoilFrameValidationTests(unittest.TestCase):
                          "invalid_zero_frame; regional prior applied")
 
 
+class FarmAssessmentTests(unittest.TestCase):
+    def test_band_score_is_continuous_and_uses_hard_bounds(self):
+        self.assertEqual(infer_server._band_score(0.30, 0.66, 0.80, 0.30, 1.25), 0.0)
+        self.assertEqual(infer_server._band_score(0.70, 0.66, 0.80, 0.30, 1.25), 100.0)
+        self.assertEqual(infer_server._band_score(1.25, 0.66, 0.80, 0.30, 1.25), 0.0)
+
+    def test_assessment_pauses_score_for_critical_soil_input(self):
+        original_decide = infer_server.decide
+        try:
+            infer_server.decide = lambda _body: ({
+                "crop": "玉米", "stage": "灌浆", "input_quality": {
+                    "soil_critical_missing": ["soil_moisture_20_pct"], "missing": [], "invalid": [],
+                }, "alerts": [], "execution_status": "safety_blocked",
+            }, {"automatic_inputs": {"source": {}}})
+            assessment = infer_server.assess_farm_condition({})
+        finally:
+            infer_server.decide = original_decide
+        self.assertIsNone(assessment["score"])
+        self.assertEqual(assessment["rating"], "数据不足")
+
+    def test_assessment_uses_weighted_model_components(self):
+        original_decide = infer_server.decide
+        try:
+            infer_server.decide = lambda _body: ({
+                "crop": "玉米", "stage": "灌浆", "relative_field_capacity": 0.72,
+                "dynamic_trigger_relative_fc": 0.66, "dynamic_target_relative_fc": 0.80,
+                "soil_n_level": "medium", "soil_p_level": "medium", "soil_k_level": "medium",
+                "predicted_environment": {"wind_max_m_s": 3, "temperature_mean_c": 24},
+                "input_quality": {"soil_critical_missing": [], "missing": [], "invalid": []},
+                "alerts": [], "execution_status": "not_needed",
+            }, {"automatic_inputs": {"soil_moisture_20_pct": 45, "soil_ph": 6.8, "soil_ec_ds_m": 1.0, "source": {}}})
+            assessment = infer_server.assess_farm_condition({})
+        finally:
+            infer_server.decide = original_decide
+        self.assertEqual(assessment["score"], 100)
+        self.assertEqual(assessment["rating"], "良好")
+
+    def test_extreme_sensor_moisture_cannot_hide_behind_other_good_inputs(self):
+        original_decide = infer_server.decide
+        try:
+            def fake_decide(body):
+                moisture = body.get("soilMoist")
+                return ({"crop": "玉米", "stage": "灌浆", "relative_field_capacity": 1.0,
+                         "dynamic_trigger_relative_fc": 0.66, "dynamic_target_relative_fc": 0.80,
+                         "soil_n_level": "medium", "soil_p_level": "medium", "soil_k_level": "medium",
+                         "predicted_environment": {"wind_max_m_s": 3, "temperature_mean_c": 24},
+                         "input_quality": {"soil_critical_missing": [], "missing": [], "invalid": []},
+                         "alerts": [], "execution_status": "not_needed"},
+                        {"automatic_inputs": {"soil_moisture_20_pct": moisture, "soil_ph": 6.8,
+                                               "soil_ec_ds_m": 1.0, "source": {}}})
+            infer_server.decide = fake_decide
+            dry = infer_server.assess_farm_condition({"soilMoist": 0})
+            saturated = infer_server.assess_farm_condition({"soilMoist": 100})
+        finally:
+            infer_server.decide = original_decide
+        self.assertLessEqual(dry["score"], 35)
+        self.assertLessEqual(saturated["score"], 35)
+
+
 if __name__ == "__main__":
     unittest.main()

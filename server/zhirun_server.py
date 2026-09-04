@@ -105,6 +105,7 @@ _valve_commands_by_device = {}
 _network_attempt_by_device = {}
 _next_valve_command_id = 1
 _weather_cache = {"key": None, "updated_at": 0, "data": None}
+_farm_assessment_cache = {}
 _auto_model_state = {
     "enabled": AUTO_MODEL_ENABLED,
     "execute_enabled": AUTO_MODEL_EXECUTE,
@@ -838,6 +839,50 @@ class Handler(BaseHTTPRequestHandler):
             with _lock:
                 data["auto_model"] = dict(_auto_model_state)
             self.send_json(200, data)
+            return
+
+        if path == "/farm/assessment":
+            requested_device_id = query.get("device_id", [None])[0]
+            with _lock:
+                device_id = current_device_id(requested_device_id)
+                latest = dict(_latest_by_device.get(device_id, {})) if device_id else {}
+                cached = dict(_farm_assessment_cache.get(device_id, {})) if device_id else {}
+            if not latest:
+                self.send_json(200, {"ok": False, "reason": "no_device_data"})
+                return
+            # Assessment requests use the same model as the work-order page.
+            # Cache for one minute so dashboard polling never turns into a
+            # stream of weather/model jobs.
+            if (cached.get("response")
+                    and cached.get("frame_sequence") == latest.get("_frameSeq")
+                    and now() - int(cached.get("cached_at", 0)) < 60):
+                response = dict(cached["response"])
+                response["cached"] = True
+                self.send_json(200, response)
+                return
+            payload = dict(latest)
+            payload.update({
+                "n_concentration_g_l": AUTO_MODEL_N_CONCENTRATION,
+                "p_concentration_g_l": AUTO_MODEL_P_CONCENTRATION,
+                "k_concentration_g_l": AUTO_MODEL_K_CONCENTRATION,
+            })
+            try:
+                request = Request(FERTIGATION_URL + "/assessment", data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                                  headers={"Content-Type": "application/json"}, method="POST")
+                with urlopen(request, timeout=30) as result:
+                    response = json.loads(result.read().decode("utf-8"))
+                response["device_id"] = device_id
+                response["frame_sequence"] = latest.get("_frameSeq")
+                response["frame_timestamp"] = latest.get("_ts")
+                response["cached"] = False
+                with _lock:
+                    _farm_assessment_cache[device_id] = {
+                        "cached_at": now(), "frame_sequence": latest.get("_frameSeq"),
+                        "response": dict(response),
+                    }
+                self.send_json(200, response)
+            except Exception as exc:
+                self.send_json(502, {"ok": False, "reason": "assessment_service_unavailable", "message": str(exc)})
             return
 
         if path == "/fertigation/auto/status":

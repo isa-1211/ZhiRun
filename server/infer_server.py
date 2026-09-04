@@ -12,14 +12,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(ROOT)
-MODEL_DIR = os.environ.get(
-    "ZHIRUN_FERTIGATION_MODEL_DIR",
-    (
-        os.path.join(os.path.expanduser("~"), "Desktop", "灌溉模型")
-        if os.name == "nt"
-        else os.path.join(PROJECT_ROOT, "灌溉模型", "灌溉模型")
-    ),
-)
+_MODEL_ENV = os.environ.get("ZHIRUN_FERTIGATION_MODEL_DIR", "").strip()
+_MODEL_CANDIDATES = [
+    _MODEL_ENV,
+    os.path.join(os.path.expanduser("~"), "Desktop", "灌溉模型"),
+    os.path.join(PROJECT_ROOT, "灌溉模型", "灌溉模型"),
+    os.path.join(PROJECT_ROOT, "灌溉模型"),
+]
+MODEL_DIR = next((path for path in _MODEL_CANDIDATES if path and os.path.isdir(path)), _MODEL_CANDIDATES[1])
 PORT = int(os.environ.get("ZHIRUN_INFER_PORT", "10001"))
 
 _lock = threading.Lock()
@@ -326,6 +326,170 @@ def decide(body):
     return result["decision"], result
 
 
+def _clamp(value, low=0.0, high=100.0):
+    return max(low, min(high, float(value)))
+
+
+def _band_score(value, ideal_low, ideal_high, hard_low, hard_high):
+    """Return a continuous 0-100 score for an agronomic target band."""
+    if value is None:
+        return None
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value) or value <= hard_low or value >= hard_high:
+        return 0.0
+    if ideal_low <= value <= ideal_high:
+        return 100.0
+    if value < ideal_low:
+        return _clamp(100.0 * (value - hard_low) / (ideal_low - hard_low))
+    return _clamp(100.0 * (hard_high - value) / (hard_high - ideal_high))
+
+
+def _level_score(level):
+    # The model's regional thresholds define low / medium / high. Medium is
+    # the target state; high remains better than deficient but is not ideal.
+    return {"low": 40.0, "medium": 100.0, "high": 75.0}.get(str(level), None)
+
+
+def assess_farm_condition(body):
+    """Create a read-only, model-derived field-condition score.
+
+    This is deliberately separate from a work order: it runs the same model
+    feature pipeline and quality gates but never exposes a command or starts
+    hardware. Its score is a condition reference, not a yield prediction.
+    """
+    request = dict(body or {})
+    # Concentrations only satisfy the model's work-order input contract. They
+    # do not affect the condition components below, which come from sensors,
+    # crop stage, soil profile, and the forecast.
+    request.setdefault("n_concentration_g_l", 100.0)
+    request.setdefault("p_concentration_g_l", 80.0)
+    request.setdefault("k_concentration_g_l", 120.0)
+    decision, result = decide(request)
+    automatic = result.get("automatic_inputs", {}) if isinstance(result, dict) else {}
+    source = automatic.get("source", {}) if isinstance(automatic, dict) else {}
+    quality = decision.get("input_quality") or source.get("input_quality") or {}
+    critical = list(quality.get("soil_critical_missing") or [])
+    missing = list(quality.get("missing") or [])
+    invalid = list(quality.get("invalid") or [])
+
+    components = []
+    relative_fc = decision.get("relative_field_capacity")
+    trigger_fc = decision.get("dynamic_trigger_relative_fc")
+    target_fc = decision.get("dynamic_target_relative_fc")
+    moisture = automatic.get("soil_moisture_20_pct")
+    # FAO-56 teacher variables: FC is the upper root-zone storage limit,
+    # PWP is the lower plant-available limit, and RAW is the depletion point.
+    # The installed probe reports a calibrated 0-100 percentage rather than
+    # volumetric water content, so use the controller's field calibration here
+    # and keep the model's dynamic trigger/target as the RAW/target fractions.
+    sensor_pwp_pct, sensor_fc_pct = 15.0, 55.0
+    if moisture is not None and trigger_fc is not None and target_fc is not None:
+        ideal_low = sensor_pwp_pct + float(trigger_fc) * (sensor_fc_pct - sensor_pwp_pct)
+        ideal_high = sensor_pwp_pct + float(target_fc) * (sensor_fc_pct - sensor_pwp_pct)
+        water_score = _band_score(moisture, ideal_low, ideal_high, sensor_pwp_pct, 75.0)
+        water_reason = "根区传感器 {:.1f}%；FAO-56可用水分目标 {:.0f}-{:.0f}%（FC {}%，PWP {}%）".format(
+            float(moisture), ideal_low, ideal_high, sensor_fc_pct, sensor_pwp_pct
+        )
+    else:
+        water_score, water_reason = None, "关键根区水分数据不可用"
+    components.append({"key": "root_water", "name": "根区水分", "weight": 45,
+                       "score": None if water_score is None else round(water_score), "reason": water_reason})
+
+    ph = automatic.get("soil_ph")
+    ec = automatic.get("soil_ec_ds_m")
+    ph_score = _band_score(ph, 6.0, 7.5, 5.0, 8.8)
+    ec_score = _band_score(ec, 0.30, 1.80, 0.05, 3.00)
+    chemistry_score = None if ph_score is None or ec_score is None else round(ph_score * 0.60 + ec_score * 0.40)
+    chemistry_reason = "pH {}，EC {} dS/m".format(
+        "--" if ph is None else round(float(ph), 2), "--" if ec is None else round(float(ec), 2)
+    )
+    components.append({"key": "soil_chemistry", "name": "土壤化学", "weight": 25,
+                       "score": chemistry_score, "reason": chemistry_reason})
+
+    nutrient_levels = [decision.get("soil_n_level"), decision.get("soil_p_level"), decision.get("soil_k_level")]
+    nutrient_values = [_level_score(level) for level in nutrient_levels]
+    nutrient_score = None if any(value is None for value in nutrient_values) else round(sum(nutrient_values) / len(nutrient_values))
+    components.append({"key": "nutrients", "name": "养分适宜度", "weight": 15,
+                       "score": nutrient_score,
+                       "reason": "N / P / K：{} / {} / {}".format(*[(level or "--") for level in nutrient_levels])})
+
+    forecast = decision.get("predicted_environment") or {}
+    wind_score = _band_score(forecast.get("wind_max_m_s"), 0.0, 6.0, -0.1, 15.0)
+    temperature_score = _band_score(forecast.get("temperature_mean_c"), 12.0, 30.0, 5.0, 38.0)
+    climate_score = None if wind_score is None or temperature_score is None else round(wind_score * 0.55 + temperature_score * 0.45)
+    components.append({"key": "operation_weather", "name": "作业气象", "weight": 10,
+                       "score": climate_score,
+                       "reason": "未来两日最大风速 {} m/s，平均气温 {}°C".format(
+                           "--" if forecast.get("wind_max_m_s") is None else round(float(forecast["wind_max_m_s"]), 1),
+                           "--" if forecast.get("temperature_mean_c") is None else round(float(forecast["temperature_mean_c"]), 1),
+                       )})
+
+    if critical:
+        confidence_score, confidence_reason = 0, "关键土壤数据缺失或异常"
+    elif missing or invalid:
+        confidence_score, confidence_reason = 55, "存在非关键缺失或异常输入"
+    else:
+        confidence_score, confidence_reason = 100, "本次模型输入完整"
+    components.append({"key": "data_confidence", "name": "数据可信度", "weight": 5,
+                       "score": confidence_score, "reason": confidence_reason})
+
+    available = all(component["score"] is not None for component in components[:3])
+    if critical or not available:
+        score, rating = None, "数据不足"
+        summary = "关键土壤数据不可用于模型决策，评分暂停；自动灌溉保持安全拦截。"
+    else:
+        score = round(sum(component["score"] * component["weight"] / 100 for component in components))
+        # A single critical water condition must not be hidden by good weather
+        # or nutrient readings. This is a reference score, not an average KPI.
+        if water_score is not None and water_score <= 0:
+            score = min(score, 35)
+        elif water_score is not None and water_score < 20:
+            score = min(score, 50)
+        rating = "良好" if score >= 85 else ("可控" if score >= 70 else ("需关注" if score >= 50 else "高风险"))
+        weakest = min(components, key=lambda component: component["score"] * component["weight"])
+        summary = "{}（{}分）：当前最需关注{}，{}。".format(rating, score, weakest["name"], weakest["reason"])
+
+    return {
+        "ok": True,
+        "assessment_type": "model_condition_reference_v1",
+        "generated_at": int(datetime.now().timestamp()),
+        "score": score,
+        "rating": rating,
+        "summary": summary,
+        "components": components,
+        "critical_inputs": critical,
+        "missing_inputs": missing,
+        "invalid_inputs": invalid,
+        "water_calibration": {
+            "sensor_field_capacity_pct": sensor_fc_pct,
+            "sensor_permanent_wilting_point_pct": sensor_pwp_pct,
+            "method": "FAO-56 FC/PWP/TAW/RAW teacher mapping; sensor-specific calibration should replace defaults",
+        },
+        "teacher_model": {
+            "name": "FAO-56 soil-water balance teacher",
+            "principles": ["field capacity (FC)", "permanent wilting point (PWP)",
+                           "total available water (TAW)", "readily available water (RAW)"],
+            "references": [
+                "https://www.fao.org/4/x0490e/x0490e00.htm",
+                "https://extension.colostate.edu/resource/irrigation-scheduling-the-water-balance-approach/",
+                "https://edis.ifas.ufl.edu/publication/AE437",
+            ],
+        },
+        "model": {
+            "crop": decision.get("crop"), "stage": decision.get("stage"),
+            "execution_status": decision.get("execution_status"),
+            "execution_reason": decision.get("execution_reason"),
+            "relative_field_capacity": relative_fc,
+            "dynamic_trigger_relative_fc": trigger_fc,
+            "dynamic_target_relative_fc": target_fc,
+            "alerts": decision.get("alerts") or [],
+        },
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
@@ -359,11 +523,15 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(404, {"error": "not_found"})
 
     def do_POST(self):
-        if self.path.split("?", 1)[0].rstrip("/") != "/predict":
+        path = self.path.split("?", 1)[0].rstrip("/")
+        if path not in {"/predict", "/assessment"}:
             self.send_json(404, {"error": "not_found"})
             return
         try:
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+            if path == "/assessment":
+                self.send_json(200, assess_farm_condition(body))
+                return
             decision, result = decide(body)
             self.send_json(200, {"ok": True, "decision": decision, "result": result})
         except Exception as exc:

@@ -30,6 +30,14 @@ class SoilFrameValidationTests(unittest.TestCase):
         }, {})
         self.assertIn("soil_moisture_20_pct", quality["soil_critical_missing"])
 
+    def test_stale_soil_frame_is_not_accepted_for_automation(self):
+        quality = infer_server._input_quality({
+            "soilMoist": 42, "soilTemp": 24, "soilEc": 1.2, "soilPH": 6.8,
+            "n": 20, "p": 15, "k": 18, "soilStale": True,
+        }, {})
+        self.assertIn("soil_moisture_20_pct", quality["soil_critical_missing"])
+        self.assertIn("soil_ec_ds_m", quality["soil_critical_missing"])
+
     def test_complete_zero_soil_frame_is_invalid(self):
         self.assertTrue(infer_server.invalid_zero_soil_frame({
             "soilMoist": 0, "soilEc": 0, "n": 0, "p": 0, "k": 0,

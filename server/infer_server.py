@@ -97,6 +97,15 @@ def _input_quality(body, sensor):
             continue
         valid[name] = number_value
 
+    # The edge collector may briefly replay the last valid soil frame while a
+    # USB or RS485 adapter recovers. It is safe to display that frame, but
+    # automation must not treat it as a fresh measurement.
+    if body.get("soilStale") or sensor.get("soilStale"):
+        stale_soil = set(_SOIL_RULES)
+        invalid.extend(sorted(stale_soil))
+        for name in stale_soil:
+            valid.pop(name, None)
+
     # A single soil-moisture reading is the installed controller interface;
     # the model adapter intentionally projects it to the three root depths.
     soil_critical = set(_SOIL_RULES)

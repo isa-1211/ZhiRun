@@ -86,5 +86,60 @@ class PortalStateTests(unittest.TestCase):
         self.assertEqual(state["networkAttempt"]["status"], "success")
 
 
+class SensorReadStabilityTests(unittest.TestCase):
+    def setUp(self):
+        self.config = dict(collector.DEFAULTS)
+        self.config["ZHIRUN_SENSOR_RETRY_COUNT"] = "1"
+        self.config["ZHIRUN_SENSOR_HOLD_S"] = "30"
+
+    def test_short_soil_read_failure_keeps_last_frame(self):
+        class FakeBus:
+            def __init__(self):
+                self.soil_reads = [[420, 245, 120, 68, 10, 20, 30], None]
+
+            def read(self, address, register, count, function=3):
+                if address == 2:
+                    return self.soil_reads.pop(0)
+                if address == 1:
+                    return [500, 250]
+                if address == 5:
+                    return [0, 1]
+                return [1]
+
+        bus = FakeBus()
+        cache = {}
+        first = collector.read_sensors(self.config, bus, cache)
+        second = collector.read_sensors(self.config, bus, cache)
+
+        self.assertEqual(first["soilMoist"], 42.0)
+        self.assertEqual(second["soilMoist"], 42.0)
+        self.assertTrue(second["soilStale"])
+
+    def test_successful_frame_replaces_cached_frame(self):
+        class FakeBus:
+            def __init__(self):
+                self.soil_reads = [[420, 245, 120, 68, 10, 20, 30],
+                                   None,
+                                   [430, 246, 130, 69, 11, 21, 31]]
+
+            def read(self, address, register, count, function=3):
+                if address == 2:
+                    return self.soil_reads.pop(0)
+                if address == 1:
+                    return [500, 250]
+                if address == 5:
+                    return [0, 1]
+                return [1]
+
+        bus = FakeBus()
+        cache = {}
+        collector.read_sensors(self.config, bus, cache)
+        collector.read_sensors(self.config, bus, cache)
+        recovered = collector.read_sensors(self.config, bus, cache)
+
+        self.assertEqual(recovered["soilMoist"], 43.0)
+        self.assertNotIn("soilStale", recovered)
+
+
 if __name__ == "__main__":
     unittest.main()

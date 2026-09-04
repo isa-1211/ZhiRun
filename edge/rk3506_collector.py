@@ -32,7 +32,9 @@ DEFAULTS = {
     "ZHIRUN_DEVICE_NAME": "RK3506B 水肥控制器",
     "ZHIRUN_RS485_PORT": "/dev/ttyUSB0",
     "ZHIRUN_RS485_BAUD": "4800",
-    "ZHIRUN_MODBUS_TIMEOUT_S": "0.35",
+    "ZHIRUN_MODBUS_TIMEOUT_S": "0.6",
+    "ZHIRUN_SENSOR_RETRY_COUNT": "3",
+    "ZHIRUN_SENSOR_HOLD_S": "30",
     "ZHIRUN_ESP_SERIAL_PORT": "/dev/ttyS1",
     "ZHIRUN_ESP_SERIAL_BAUD": "115200",
     "ZHIRUN_POLL_INTERVAL_S": "0.5",
@@ -241,30 +243,53 @@ def signed16(value):
     return value - 65536 if value & 0x8000 else value
 
 
-def read_sensors(config, bus):
+def read_with_retry(config, bus, address, register, count, function=3):
+    """Retry a Modbus frame to absorb a transient USB/RS485 error."""
+    attempts = max(1, int_value(config, "ZHIRUN_SENSOR_RETRY_COUNT"))
+    for attempt in range(attempts):
+        values = bus.read(address, register, count, function=function)
+        if values is not None:
+            return values
+        if attempt + 1 < attempts:
+            time.sleep(0.05)
+    return None
+
+
+def read_sensors(config, bus, cache=None):
     data = {}
-    soil = bus.read(int_value(config, "ZHIRUN_SOIL_ADDR"), 0, 7)
+    cache = cache if cache is not None else {}
+    soil = read_with_retry(config, bus, int_value(config, "ZHIRUN_SOIL_ADDR"), 0, 7)
     if soil:
-        data.update({"soilMoist": soil[0] / 10.0, "soilTemp": signed16(soil[1]) / 10.0,
-                     "soilEc": soil[2] / 1000.0, "soilPH": soil[3] / 10.0,
-                     "n": soil[4], "p": soil[5], "k": soil[6]})
-    climate = bus.read(int_value(config, "ZHIRUN_TH_ADDR"), 0, 2)
+        soil_values = {"soilMoist": soil[0] / 10.0, "soilTemp": signed16(soil[1]) / 10.0,
+                       "soilEc": soil[2] / 1000.0, "soilPH": soil[3] / 10.0,
+                       "n": soil[4], "p": soil[5], "k": soil[6]}
+        data.update(soil_values)
+        cache["soil"] = {"values": soil_values, "at": time.monotonic()}
+    else:
+        previous = cache.get("soil")
+        hold_s = max(0.0, float_value(config, "ZHIRUN_SENSOR_HOLD_S"))
+        if previous and time.monotonic() - previous["at"] <= hold_s:
+            data.update(previous["values"])
+            data["soilStale"] = True
+            data["soilAgeS"] = round(time.monotonic() - previous["at"], 1)
+    climate = read_with_retry(config, bus, int_value(config, "ZHIRUN_TH_ADDR"), 0, 2)
     if climate:
         data.update({"airHum": climate[0] / 10.0, "airTemp": signed16(climate[1]) / 10.0})
-    co2 = bus.read(int_value(config, "ZHIRUN_CO2_ADDR"), 0, 1)
+    co2 = read_with_retry(config, bus, int_value(config, "ZHIRUN_CO2_ADDR"), 0, 1)
     if co2:
         data["co2"] = co2[0]
-    light = bus.read(int_value(config, "ZHIRUN_LIGHT_ADDR"), 0, 2)
+    light = read_with_retry(config, bus, int_value(config, "ZHIRUN_LIGHT_ADDR"), 0, 2)
     if light:
         data["lux"] = (light[0] << 16) | light[1]
     wind_addr = config.get("ZHIRUN_WIND_ADDR", "").strip()
     if wind_addr:
-        wind = bus.read(int(wind_addr, 0), int_value(config, "ZHIRUN_WIND_REG"), 1, function=4)
+        wind = read_with_retry(config, bus, int(wind_addr, 0), int_value(config, "ZHIRUN_WIND_REG"), 1, function=4)
         if wind:
             data["windSpeed"] = wind[0] / 10.0
     rain_addr = config.get("ZHIRUN_RAIN_ADDR", "").strip()
     if rain_addr:
-        rain = bus.read(
+        rain = read_with_retry(
+            config, bus,
             int(rain_addr, 0),
             int_value(config, "ZHIRUN_RAIN_REG"),
             1,
@@ -826,6 +851,7 @@ def main():
     last_campus_check = 0.0
     last_error = ""
     network_state = {}
+    sensor_cache = {}
     try:
         bus = Modbus(config)
         esp = Esp32Link(config)
@@ -867,7 +893,7 @@ def main():
             if now - last_push >= float_value(config, "ZHIRUN_PUSH_INTERVAL_S"):
                 last_push = now
                 try:
-                    payload = read_sensors(config, bus)
+                    payload = read_sensors(config, bus, sensor_cache)
                     payload.update(network_snapshot(server))
                     payload.update(network_state)
                     payload.update({"esp32": esp.snapshot(), "collectorError": last_error})

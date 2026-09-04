@@ -38,6 +38,9 @@ def main():
         print(run(client, "python3 -m py_compile /tmp/rk3506_collector.py /tmp/board_serial_role_probe.py"))
         print(run(client, (
             "/etc/init.d/S98zhirun-collector stop; "
+            "cp -p /etc/zhirun-rk3506.env /userdata/zhirun-rk3506.env.before-sensor-stability 2>/dev/null || true; "
+            "for kv in 'ZHIRUN_MODBUS_TIMEOUT_S=0.6' 'ZHIRUN_SENSOR_RETRY_COUNT=3' 'ZHIRUN_SENSOR_HOLD_S=30'; do "
+            "key=${kv%%=*}; if grep -q \"^${key}=\" /etc/zhirun-rk3506.env; then sed -i \"s/^${key}=.*/${kv}/\" /etc/zhirun-rk3506.env; else echo \"${kv}\" >> /etc/zhirun-rk3506.env; fi; done; "
             "cp -p /oem/usr/bin/rk3506_collector.py /userdata/rk3506_collector.py.before-usb-role-detect; "
             "install -m 755 /tmp/rk3506_collector.py /oem/usr/bin/rk3506_collector.py; "
             "python3 /tmp/board_serial_role_probe.py; "

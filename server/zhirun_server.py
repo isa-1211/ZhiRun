@@ -1206,7 +1206,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": "missing_state"})
                 return
             with _lock:
-                _valve_by_device[device_id] = state
+                previous = _valve_by_device.get(device_id, {})
+                merged = dict(state)
+                # A scan result is reported once, while controller state arrives
+                # continuously. Keep scan data until the next scan replaces it.
+                for key in ("wifiNetworks", "wifiScannedAt"):
+                    if key not in merged and key in previous:
+                        merged[key] = previous[key]
+                _valve_by_device[device_id] = merged
             self.send_json(200, {"ok": True})
             return
 

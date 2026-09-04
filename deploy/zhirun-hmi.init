@@ -3,14 +3,37 @@
 APP=/oem/usr/bin/zhirun_hmi_demo
 LOG=/tmp/zhirun_hmi.log
 
+configure_audio() {
+    # The codec/control names are board-image dependent. Keep startup alive
+    # when a carrier board exposes a different mixer layout.
+    command -v amixer >/dev/null 2>&1 || return 0
+    amixer -c 0 sset 'Speaker' unmute >/dev/null 2>&1 || true
+    amixer -c 0 sset 'PCM' 100% unmute >/dev/null 2>&1 || true
+    amixer -c 0 sset 'Output 1' 100% >/dev/null 2>&1 || true
+    amixer -c 0 sset 'Output 2' 100% >/dev/null 2>&1 || true
+}
+
+recover_background_services() {
+    # Starting the Rockchip display/audio stack briefly exhausts this 98 MB
+    # board. If the OOM killer takes a lightweight network process, restore it
+    # after the six-second boot animation has released its frame buffer.
+    nohup sh -c '
+        sleep 8
+        /etc/init.d/S97zhirun-wifi start >/dev/null 2>&1 || true
+        /etc/init.d/S98zhirun-collector start >/dev/null 2>&1 || true
+    ' >/tmp/zhirun-service-recovery.log 2>&1 &
+}
+
 start() {
-    killall -9 lv_demo rk_demo lv_rk3506_hmi_test zhirun_hmi_demo 2>/dev/null || true
+    killall -9 lv_demo rk_demo lv_rk3506_hmi_test zhirun_hmi_demo aplay 2>/dev/null || true
     sleep 1
+    configure_audio
     nohup env LD_LIBRARY_PATH=/oem/usr/lib "$APP" >"$LOG" 2>&1 &
+    recover_background_services
 }
 
 stop() {
-    killall -9 zhirun_hmi_demo 2>/dev/null || true
+    killall -9 zhirun_hmi_demo aplay 2>/dev/null || true
 }
 
 case "$1" in

@@ -375,6 +375,11 @@ void handleCommand(const String &json) {
     fertigationActive = anyPumpOn();
     if (fertigationActive) fertigationState = "dosing";
     else startOutletPump();
+  } else if (action == "fertigation_stop") {
+    // The dashboard and the HMI both stop a job through this action. Without
+    // its own branch it fell through to unsupported_command and left the
+    // relays running, so treat it as a full stop.
+    stopAll("fertigation_stop");
   } else if (action == "outlet_test") {
     const String requested = jsonString(command, "manual_action");
     if (requested == "open" || requested == "on") {

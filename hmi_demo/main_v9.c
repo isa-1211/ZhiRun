@@ -29,6 +29,9 @@ static lv_obj_t *weather_label;
 static lv_obj_t *model_label;
 static lv_obj_t *network_label;
 static lv_obj_t *valve_detail_label;
+/* N / P / K dosing pumps and the mixing-tank outlet pump, in that order. */
+static lv_obj_t *pump_state_labels[4];
+static lv_obj_t *valve_action_label;
 static unsigned current_page;
 
 #define BOOT_FRAME_FILE "/userdata/zhirun/zhirun_boot_frames.rgb565"
@@ -214,23 +217,33 @@ static void refresh(lv_timer_t *timer) {
         "Model: server\nExtraTrees multi-output policy\nDaily 12:00 automatic run; manual work order available\nMissing fertilizer data allows water-only irrigation; invalid soil data blocks safely");
 
     if (request("GET", "/valve/config", NULL, response, sizeof(response)) == 0) {
-        bool online = false, pump_on = false, n_on = false, p_on = false, k_on = false, outlet_on = false;
+        static const char *state_keys[] = {"nPumpOn", "pPumpOn", "kPumpOn", "outletPumpOn"};
+        bool online = false, pump_on = false, states[4] = {false, false, false, false};
         json_boolean(response, "online", &online);
         if (!online) {
             lv_label_set_text(pump_label, "Controller offline");
+            for (unsigned index = 0; index < 4; index++)
+                if (pump_state_labels[index]) lv_label_set_text(pump_state_labels[index], "--");
             if (valve_detail_label) lv_label_set_text(valve_detail_label, "Valve status unavailable");
         }
         else {
             json_boolean(response, "valveOn", &pump_on);
-            json_boolean(response, "nPumpOn", &n_on);
-            json_boolean(response, "pPumpOn", &p_on);
-            json_boolean(response, "kPumpOn", &k_on);
-            json_boolean(response, "outletPumpOn", &outlet_on);
+            for (unsigned index = 0; index < 4; index++) {
+                json_boolean(response, state_keys[index], &states[index]);
+                if (pump_state_labels[index])
+                    lv_label_set_text(pump_state_labels[index], states[index] ? "ON" : "OFF");
+            }
             lv_label_set_text(pump_label, pump_on ? "Irrigation: ON" : "Irrigation: OFF");
-            char detail[240];
-            snprintf(detail, sizeof(detail), "N pump GPIO4: %s\nP pump GPIO5: %s\nK pump GPIO6: %s\nOutlet GPIO7: %s",
-                     n_on ? "ON" : "OFF", p_on ? "ON" : "OFF",
-                     k_on ? "ON" : "OFF", outlet_on ? "ON" : "OFF");
+            char stage[32] = "idle", detail[240];
+            double delivered[3] = {0, 0, 0}, outlet_seconds = 0;
+            json_string(response, "fertigationState", stage, sizeof(stage));
+            json_number(response, "nDeliveredL", &delivered[0]);
+            json_number(response, "pDeliveredL", &delivered[1]);
+            json_number(response, "kDeliveredL", &delivered[2]);
+            json_number(response, "outletRunSeconds", &outlet_seconds);
+            snprintf(detail, sizeof(detail),
+                     "Stage: %s\nDelivered  N %.2f L   P %.2f L   K %.2f L\nOutlet running %.0f s",
+                     stage, delivered[0], delivered[1], delivered[2], outlet_seconds);
             if (valve_detail_label) lv_label_set_text(valve_detail_label, detail);
         }
     }
@@ -250,6 +263,33 @@ static void stop_pump(lv_event_t *event) {
         lv_label_set_text(pump_label, "STOP queued");
     else
         lv_label_set_text(pump_label, "Command failed");
+}
+
+/* The N/P/K dosing pumps share the bounded test endpoint; the mixing-tank
+ * outlet pump has its own endpoint because it carries a run duration. */
+static void pump_command(unsigned index, bool start) {
+    static const char *pump_keys[] = {"n", "p", "k"};
+    char body[96], response[1024];
+    const char *path;
+    if (index < 3) {
+        path = "/pump/test";
+        snprintf(body, sizeof(body), "{\"pump\":\"%s\",\"action\":\"%s\"}",
+                 pump_keys[index], start ? "open" : "close");
+    } else {
+        path = "/outlet/test";
+        snprintf(body, sizeof(body), "{\"action\":\"%s\",\"run_seconds\":10}",
+                 start ? "open" : "close");
+    }
+    const int sent = request("POST", path, body, response, sizeof(response));
+    if (valve_action_label)
+        lv_label_set_text(valve_action_label,
+                          sent == 0 ? (start ? "Start queued" : "Stop queued")
+                                    : "Command failed");
+}
+
+static void pump_button(lv_event_t *event) {
+    const uintptr_t data = (uintptr_t)lv_event_get_user_data(event);
+    pump_command((unsigned)(data >> 1), (data & 1u) != 0);
 }
 
 static lv_obj_t *make_panel(lv_obj_t *parent, int x, int y, int width, int height) {
@@ -276,7 +316,6 @@ static lv_obj_t *make_page(lv_obj_t *parent) {
     lv_obj_set_style_pad_all(page, 12, 0);
     lv_obj_clear_flag(page, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(page, LV_OBJ_FLAG_GESTURE_BUBBLE);
-    lv_obj_add_event_cb(page, gesture_page, LV_EVENT_GESTURE, NULL);
     return page;
 }
 
@@ -369,25 +408,71 @@ static void build_dashboard(void) {
         lv_obj_align(metric_labels[index], LV_ALIGN_BOTTOM_LEFT, 0, -2);
     }
 
-    lv_obj_t *control_panel = make_panel(pages[2], 7, 7, 230, 91);
+    /* The valve page holds a status header, one control row per pump and a
+     * job detail line, so let it scroll vertically like the data page. */
+    lv_obj_add_flag(pages[2], LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(pages[2], LV_DIR_VER);
+
+    lv_obj_t *control_panel = make_panel(pages[2], 7, 7, 360, 66);
     lv_obj_t *control_title = lv_label_create(control_panel);
     lv_label_set_text(control_title, "Pump status");
     lv_obj_set_style_text_color(control_title, lv_color_hex(0x58D3AE), 0);
     pump_label = lv_label_create(control_panel);
     lv_label_set_text(pump_label, "State unknown");
-    lv_obj_set_width(pump_label, 210);
-    lv_obj_set_pos(pump_label, 0, 27);
+    lv_obj_set_width(pump_label, 335);
+    lv_obj_set_pos(pump_label, 0, 25);
 
-    lv_obj_t *action_panel = make_panel(pages[2], 252, 7, 230, 91);
+    lv_obj_t *action_panel = make_panel(pages[2], 380, 7, 360, 66);
     lv_obj_t *button = lv_btn_create(action_panel);
-    lv_obj_set_size(button, 210, 58);
-    lv_obj_align(button, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_size(button, 338, 44);
+    lv_obj_center(button);
+    lv_obj_add_flag(button, LV_OBJ_FLAG_GESTURE_BUBBLE);
     lv_obj_add_event_cb(button, stop_pump, LV_EVENT_CLICKED, NULL);
     lv_obj_t *button_label = lv_label_create(button);
     lv_label_set_text(button_label, "STOP ALL");
     lv_obj_center(button_label);
 
-    valve_detail_label = page_text(pages[2], "Waiting for valve status", 7, 119, 740);
+    static const char *pump_rows[] = {
+        "N pump   IN1 / GPIO4", "P pump   IN2 / GPIO5",
+        "K pump   IN3 / GPIO6", "Outlet pump   IN4 / GPIO7"
+    };
+    for (unsigned index = 0; index < 4; index++) {
+        lv_obj_t *row = make_panel(pages[2], 7, 81 + (int)index * 56, 733, 50);
+        lv_obj_t *name = lv_label_create(row);
+        lv_label_set_text(name, pump_rows[index]);
+        lv_obj_set_style_text_color(name, lv_color_hex(0xDCE6F4), 0);
+        lv_obj_align(name, LV_ALIGN_LEFT_MID, 0, 0);
+
+        pump_state_labels[index] = lv_label_create(row);
+        lv_label_set_text(pump_state_labels[index], "--");
+        lv_obj_set_style_text_color(pump_state_labels[index], lv_color_hex(0x58D3AE), 0);
+        lv_obj_align(pump_state_labels[index], LV_ALIGN_LEFT_MID, 260, 0);
+
+        /* user_data packs the pump index and the requested action: bit 0 set
+         * means start, clear means stop. */
+        lv_obj_t *start = lv_btn_create(row);
+        lv_obj_set_size(start, 108, 30);
+        lv_obj_align(start, LV_ALIGN_RIGHT_MID, -118, 0);
+        lv_obj_add_flag(start, LV_OBJ_FLAG_GESTURE_BUBBLE);
+        lv_obj_add_event_cb(start, pump_button, LV_EVENT_CLICKED,
+                            (void *)(uintptr_t)((index << 1) | 1u));
+        lv_obj_t *start_label = lv_label_create(start);
+        lv_label_set_text(start_label, "START");
+        lv_obj_center(start_label);
+
+        lv_obj_t *stop = lv_btn_create(row);
+        lv_obj_set_size(stop, 108, 30);
+        lv_obj_align(stop, LV_ALIGN_RIGHT_MID, 0, 0);
+        lv_obj_add_flag(stop, LV_OBJ_FLAG_GESTURE_BUBBLE);
+        lv_obj_add_event_cb(stop, pump_button, LV_EVENT_CLICKED,
+                            (void *)(uintptr_t)(index << 1));
+        lv_obj_t *stop_label = lv_label_create(stop);
+        lv_label_set_text(stop_label, "STOP");
+        lv_obj_center(stop_label);
+    }
+
+    valve_action_label = page_text(pages[2], "Ready", 7, 311, 733);
+    valve_detail_label = page_text(pages[2], "Waiting for valve status", 7, 337, 733);
     weather_label = page_text(pages[1], "Waiting for environment data", 7, 7, 740);
     model_label = page_text(pages[3], "Model: server\nExtraTrees multi-output policy\nDaily 12:00 automatic run", 7, 7, 740);
     network_label = page_text(pages[4], "Waiting for network status", 7, 7, 740);

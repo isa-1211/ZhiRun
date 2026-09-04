@@ -43,5 +43,11 @@ The default model/API host is `8.145.49.45:80`. Override it at compile
 time with `-DHMI_SERVER_HOST=\"your.server.ip\"` and
 `-DHMI_SERVER_PORT=80`.
 
+The board boot service plays the visual RGB565 frame sequence and matching PCM WAV
+derived from `assets/zhirun_boot_animation.mp4` before starting this application.
+They are deployed to `/userdata/zhirun/zhirun_boot_frames.rgb565` and
+`/userdata/zhirun/zhirun_boot_audio.wav`; see
+`docs/RK3506B_扬声器接线与开机动画.md` for the speaker wiring and audio test.
+
 Do not stop `/usr/bin/lv_demo` or edit `/etc/init.d/pre_init/S10lv_demo` until
 the vendor SDK build and the UART/network wiring have been confirmed.

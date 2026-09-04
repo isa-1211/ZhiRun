@@ -4,7 +4,7 @@ This is a native LVGL screen for the HD-RK3506-HMI board. It mirrors the
 important parts of the web frontend without running a browser:
 
 - air temperature and humidity, CO2, and light;
-- soil moisture, temperature, pH, EC, nitrogen, phosphorus, and potassium;
+- soil moisture, temperature, pH, nitrogen, phosphorus, and potassium;
 - wind speed and rainfall;
 - N/P/K dosing-pump and mixing-tank outlet-pump states;
 - touch stop button for the `/fertigation/stop` safety API.

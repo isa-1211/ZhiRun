@@ -23,7 +23,7 @@ extern void lv_port_init(int width, int height, int rotation);
 #endif
 
 static lv_obj_t *status_label;
-static lv_obj_t *metric_labels[13];
+static lv_obj_t *metric_labels[12];
 static lv_obj_t *source_label;
 static lv_obj_t *pump_label;
 static lv_obj_t *pages[5];
@@ -382,14 +382,14 @@ static void refresh(lv_timer_t *timer) {
     (void)timer;
     fprintf(stderr, "HMI_REFRESH begin\n");
     char response[4096], device[64] = "unknown", source[32] = "unknown";
-    double values[13] = {0}, age;
+    double values[12] = {0}, age;
 
     wifi_local_status();
 
     if (request("GET", "/data", NULL, response, sizeof(response)) != 0) {
         fprintf(stderr, "HMI_REFRESH data_request_failed\n");
         lv_label_set_text(status_label, "Device offline");
-        for (unsigned index = 0; index < 13; index++) lv_label_set_text(metric_labels[index], "--");
+        for (unsigned index = 0; index < 12; index++) lv_label_set_text(metric_labels[index], "--");
         lv_label_set_text(source_label, "Check Ethernet or Wi-Fi");
         return;
     }
@@ -397,15 +397,15 @@ static void refresh(lv_timer_t *timer) {
 
     static const char *keys[] = {
         "airTemp", "airHum", "co2", "lux", "soilMoist", "soilTemp",
-        "soilPH", "soilEc", "n", "p", "k", "windSpeed", "rainMm"
+        "soilPH", "n", "p", "k", "windSpeed", "rainMm"
     };
     static const char *units[] = {
-        "C", "%", "ppm", "lux", "%", "C", "", "dS/m",
+        "C", "%", "ppm", "lux", "%", "C", "",
         "mg/kg", "mg/kg", "mg/kg", "m/s", "mm"
     };
-    static const unsigned precision[] = {1, 1, 0, 0, 1, 1, 2, 2, 0, 0, 0, 1, 1};
-    bool available[13];
-    for (unsigned index = 0; index < 13; index++) {
+    static const unsigned precision[] = {1, 1, 0, 0, 1, 1, 2, 0, 0, 0, 1, 1};
+    bool available[12];
+    for (unsigned index = 0; index < 12; index++) {
         available[index] = json_number(response, keys[index], &values[index]);
         set_metric(index, available[index], values[index], precision[index], units[index]);
     }
@@ -427,7 +427,7 @@ static void refresh(lv_timer_t *timer) {
     char weather_text[220];
     snprintf(weather_text, sizeof(weather_text),
              "Air temp %.1f C\nAir humidity %.1f %%\nWind %.1f m/s\nRain %.1f mm",
-             values[0], values[1], values[11], values[12]);
+             values[0], values[1], values[10], values[11]);
     if (weather_label) lv_label_set_text(weather_label, weather_text);
     if (model_label) lv_label_set_text(model_label,
         "Model: server\nExtraTrees multi-output policy\nDaily 12:00 automatic run; manual work order available\nMissing fertilizer data allows water-only irrigation; invalid soil data blocks safely");
@@ -601,7 +601,7 @@ static void build_dashboard(void) {
     }
 
     for (unsigned i = 0; i < 5; i++) pages[i] = make_page(screen);
-    /* The data page contains 13 cards. Keep the viewport compact and let the
+    /* The data page contains 12 cards. Keep the viewport compact and let the
      * user scroll vertically through all cards on the 800x480 display. */
     lv_obj_add_flag(pages[0], LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(pages[0], LV_DIR_VER);
@@ -609,9 +609,9 @@ static void build_dashboard(void) {
 
     static const char *names[] = {
         "Air temperature", "Air humidity", "CO2", "Light", "Soil moisture",
-        "Soil temperature", "Soil pH", "Soil EC", "Nitrogen N", "Phosphorus P", "Potassium K", "Wind", "Rain"
+        "Soil temperature", "Soil pH", "Nitrogen N", "Phosphorus P", "Potassium K", "Wind", "Rain"
     };
-    for (unsigned index = 0; index < 13; index++) {
+    for (unsigned index = 0; index < 12; index++) {
         int column = (int)(index % 3);
         int row = (int)(index / 3);
         lv_obj_t *panel = make_panel(pages[0], 7 + column * 252, 7 + row * 90, 244, 82);

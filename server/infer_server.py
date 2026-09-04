@@ -41,7 +41,6 @@ _defaults = None
 # missing sensor data from silently looking like a valid regional prior.
 _SOIL_RULES = {
     "soil_moisture_20_pct": (("soil_moisture_20_pct", "moisture20", "soilMoist"), 0.0, 100.0),
-    "soil_ec_ds_m": (("soil_ec_ds_m", "soilEc", "soil_ec"), 0.0, 20.0),
     "soil_ph": (("soil_ph", "soilPH"), 0.0, 14.0),
     "soil_temperature_c": (("soil_temperature_c", "soilTemp"), -40.0, 70.0),
     "soil_n_mg_kg": (("soil_n_mg_kg", "soilN"), 0.0, 10000.0),
@@ -204,7 +203,6 @@ def invalid_zero_soil_frame(body):
     """Detect a powered sensor whose measurement electrodes have no valid sample."""
     values = (
         first_value(body, "soil_moisture_20_pct", "moisture20", "soilMoist"),
-        first_value(body, "soil_ec_ds_m", "soilEc", "soil_ec"),
         first_value(body, "soil_n_mg_kg", "n"),
         first_value(body, "soil_p_mg_kg", "p"),
         first_value(body, "soil_k_mg_kg", "k"),
@@ -254,14 +252,13 @@ def environment_from_request(body, crop):
         "light_lux": ("light_lux", "lux"),
         "rain_24h_mm": ("rain_24h_mm", "rainMm"),
         "soil_ph": ("soil_ph", "soilPH"),
-        "soil_ec_ds_m": ("soil_ec_ds_m", "soilEc", "soil_ec"),
         "rain_next_2d_mm": ("rain_next_2d_mm", "rain_next_2d"),
         "eto_forecast_mm": ("eto_forecast_mm", "eto"),
         "weather_forecast": ("weather_forecast",),
     }
     for target, keys in mappings.items():
         if zero_soil_frame and target in {
-            "soil_n_mg_kg", "soil_p_mg_kg", "soil_k_mg_kg", "soil_ph", "soil_ec_ds_m",
+            "soil_n_mg_kg", "soil_p_mg_kg", "soil_k_mg_kg", "soil_ph",
         }:
             continue
         value = first_value(body, *keys)
@@ -291,7 +288,7 @@ def environment_from_request(body, crop):
     }
     if zero_soil_frame:
         quality["soil_critical_missing"] = sorted(set(quality["soil_critical_missing"]) | {
-            "soil_moisture_20_pct", "soil_ec_ds_m", "soil_ph",
+            "soil_moisture_20_pct", "soil_ph",
         })
         quality["fertilizer_blocked"] = sorted(set(quality["fertilizer_blocked"]) | {
             "soil_n_mg_kg", "soil_p_mg_kg", "soil_k_mg_kg",
@@ -399,14 +396,10 @@ def assess_farm_condition(body):
                        "score": None if water_score is None else round(water_score), "reason": water_reason})
 
     ph = automatic.get("soil_ph")
-    ec = automatic.get("soil_ec_ds_m")
     ph_score = _band_score(ph, 6.0, 7.5, 5.0, 8.8)
-    ec_score = _band_score(ec, 0.30, 1.80, 0.05, 3.00)
-    chemistry_score = None if ph_score is None or ec_score is None else round(ph_score * 0.60 + ec_score * 0.40)
-    chemistry_reason = "pH {}，EC {} dS/m".format(
-        "--" if ph is None else round(float(ph), 2), "--" if ec is None else round(float(ec), 2)
-    )
-    components.append({"key": "soil_chemistry", "name": "土壤化学", "weight": 25,
+    chemistry_score = None if ph_score is None else round(ph_score)
+    chemistry_reason = "pH {}".format("--" if ph is None else round(float(ph), 2))
+    components.append({"key": "soil_ph", "name": "土壤 pH", "weight": 25,
                        "score": chemistry_score, "reason": chemistry_reason})
 
     nutrient_levels = [decision.get("soil_n_level"), decision.get("soil_p_level"), decision.get("soil_k_level")]

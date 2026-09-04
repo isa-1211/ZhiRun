@@ -58,8 +58,8 @@ RECORDING_LIMIT = 105120  # Five-minute samples for one year.
 LEGACY_DEVICE_ID = "legacy-default"
 
 # ---- 固定字段布局 ------------------------------------------------------------
-# 本设备是环境监测设备, 字段固定为下面 13 项, 不随设备上报动态增减:
-# 无论设备某一帧发没发某个键, 这 13 格永远显示 (缺值显示 "--", 有值即实时更新)。
+# 本设备是环境监测设备, 字段固定为下面 12 项, 不随设备上报动态增减:
+# 无论设备某一帧发没发某个键, 这 12 格永远显示 (缺值显示 "--", 有值即实时更新)。
 # group: headline=顶部大数字, sensor=传感器网格。digits=小数位。
 FIELDS_LIST = [
     ("airTemp",   "空气温度",  "°C",      "headline", 1),
@@ -69,14 +69,13 @@ FIELDS_LIST = [
     ("soilMoist", "土壤水分",  "%",       "sensor",   1),
     ("soilTemp",  "土壤温度",  "°C",      "sensor",   1),
     ("soilPH",    "土壤 PH",   "",        "sensor",   2),
-    ("soilEc",    "土壤 EC",   "dS/m",    "sensor",   2),
     ("windSpeed", "瞬时风速",  "m/s",     "sensor",   1),
     ("n",         "氮 N",      "mg/kg",   "sensor",   0),
     ("p",         "磷 P",      "mg/kg",   "sensor",   0),
     ("k",         "钾 K",      "mg/kg",   "sensor",   0),
     ("rainMm",    "雨量",      "mm/24h",  "sensor",   1),
 ]
-# 固定 schema: 每台设备都用同一套 13 字段布局, 与设备上报的 fields 无关
+# 固定 schema: 每台设备都用同一套 12 字段布局, 与设备上报的 fields 无关
 FIXED_FIELDS = [
     {"key": k, "label": lab, "unit": u, "group": g, "digits": d}
     for (k, lab, u, g, d) in FIELDS_LIST
@@ -88,7 +87,7 @@ IGNORE_KEYS = {"rainTips"}
 
 
 def resolve_fields(device, latest):
-    """返回固定的 13 项环境字段布局。
+    """返回固定的 12 项环境字段布局。
 
     不再依赖设备上报的 fields, 也不再因某帧缺失而增删字段——布局恒定,
     每格的数值由 /data 提供 (有值实时刷新, 无值显示 --)。

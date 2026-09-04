@@ -16,7 +16,7 @@ class SoilFrameValidationTests(unittest.TestCase):
     def test_quality_gate_keeps_missing_wind_direction_noncritical(self):
         quality = infer_server._input_quality({
             "n_concentration_g_l": 100, "p_concentration_g_l": 80, "k_concentration_g_l": 120,
-            "soilMoist": 18, "soilTemp": 22, "soilEc": 1.0, "soilPH": 7.8,
+            "soilMoist": 18, "soilTemp": 22, "soilPH": 7.8,
             "soilN": 1200, "soilP": 20, "soilK": 160,
         }, {})
         self.assertEqual(quality["soil_critical_missing"], [])
@@ -25,28 +25,27 @@ class SoilFrameValidationTests(unittest.TestCase):
     def test_quality_gate_marks_missing_soil_as_irrigation_blocker(self):
         quality = infer_server._input_quality({
             "n_concentration_g_l": 100, "p_concentration_g_l": 80, "k_concentration_g_l": 120,
-            "soilTemp": 22, "soilEc": 1.0, "soilPH": 7.8,
+            "soilTemp": 22, "soilPH": 7.8,
             "soilN": 1200, "soilP": 20, "soilK": 160,
         }, {})
         self.assertIn("soil_moisture_20_pct", quality["soil_critical_missing"])
 
     def test_stale_soil_frame_is_not_accepted_for_automation(self):
         quality = infer_server._input_quality({
-            "soilMoist": 42, "soilTemp": 24, "soilEc": 1.2, "soilPH": 6.8,
+            "soilMoist": 42, "soilTemp": 24, "soilPH": 6.8,
             "n": 20, "p": 15, "k": 18, "soilStale": True,
         }, {})
         self.assertIn("soil_moisture_20_pct", quality["soil_critical_missing"])
-        self.assertIn("soil_ec_ds_m", quality["soil_critical_missing"])
 
     def test_complete_zero_soil_frame_is_invalid(self):
         self.assertTrue(infer_server.invalid_zero_soil_frame({
-            "soilMoist": 0, "soilEc": 0, "n": 0, "p": 0, "k": 0,
+            "soilMoist": 0, "n": 0, "p": 0, "k": 0,
         }))
 
     def test_partial_or_nonzero_frame_is_not_invalid(self):
-        self.assertFalse(infer_server.invalid_zero_soil_frame({"soilMoist": 0, "soilEc": 0}))
+        self.assertFalse(infer_server.invalid_zero_soil_frame({"soilMoist": 0}))
         self.assertFalse(infer_server.invalid_zero_soil_frame({
-            "soilMoist": 12.5, "soilEc": 0, "n": 0, "p": 0, "k": 0,
+            "soilMoist": 12.5, "n": 0, "p": 0, "k": 0,
         }))
 
     def test_invalid_frame_keeps_temperature_and_omits_soil_measurements(self):
@@ -55,13 +54,13 @@ class SoilFrameValidationTests(unittest.TestCase):
         infer_server._provider, infer_server._defaults = provider, (40.84, 111.75)
         try:
             infer_server.environment_from_request({
-                "soilMoist": 0, "soilTemp": 22.9, "soilEc": 0, "soilPH": 9,
+                "soilMoist": 0, "soilTemp": 22.9, "soilPH": 9,
                 "n": 0, "p": 0, "k": 0,
             }, "玉米")
         finally:
             infer_server._provider, infer_server._defaults = original_provider, original_defaults
         self.assertEqual(provider.sensor_data["soil_temperature_c"], 22.9)
-        for key in ("soil_moisture_20_pct", "soil_ec_ds_m", "soil_ph",
+        for key in ("soil_moisture_20_pct", "soil_ph",
                     "soil_n_mg_kg", "soil_p_mg_kg", "soil_k_mg_kg"):
             self.assertNotIn(key, provider.sensor_data)
         self.assertEqual(provider.sensor_data["source"]["soil_sensor"],
@@ -98,7 +97,7 @@ class FarmAssessmentTests(unittest.TestCase):
                 "predicted_environment": {"wind_max_m_s": 3, "temperature_mean_c": 24},
                 "input_quality": {"soil_critical_missing": [], "missing": [], "invalid": []},
                 "alerts": [], "execution_status": "not_needed",
-            }, {"automatic_inputs": {"soil_moisture_20_pct": 45, "soil_ph": 6.8, "soil_ec_ds_m": 1.0, "source": {}}})
+            }, {"automatic_inputs": {"soil_moisture_20_pct": 45, "soil_ph": 6.8, "source": {}}})
             assessment = infer_server.assess_farm_condition({})
         finally:
             infer_server.decide = original_decide
@@ -117,7 +116,7 @@ class FarmAssessmentTests(unittest.TestCase):
                          "input_quality": {"soil_critical_missing": [], "missing": [], "invalid": []},
                          "alerts": [], "execution_status": "not_needed"},
                         {"automatic_inputs": {"soil_moisture_20_pct": moisture, "soil_ph": 6.8,
-                                               "soil_ec_ds_m": 1.0, "source": {}}})
+                                               "source": {}}})
             infer_server.decide = fake_decide
             dry = infer_server.assess_farm_condition({"soilMoist": 0})
             saturated = infer_server.assess_farm_condition({"soilMoist": 100})

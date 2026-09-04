@@ -393,7 +393,6 @@
         <div class="auto-grid">
           <div class="auto-cell"><span>土壤水分</span><b id="modelSoilMoist">--</b><small>%</small></div>
           <div class="auto-cell"><span>土壤温度</span><b id="modelSoilTemp">--</b><small>°C</small></div>
-          <div class="auto-cell"><span>土壤 EC</span><b id="modelSoilEc">--</b><small>dS/m</small></div>
           <div class="auto-cell"><span>土壤 pH</span><b id="modelSoilPh">--</b></div>
           <div class="auto-cell"><span>有效氮 N</span><b id="modelN">--</b><small>mg/kg</small></div>
           <div class="auto-cell"><span>有效磷 P</span><b id="modelP">--</b><small>mg/kg</small></div>
@@ -483,7 +482,7 @@
 const $=id=>document.getElementById(id);
 let schema=[], cfg={};
 function fmt(v,d){return (v===null||v===undefined)?'--':(typeof v==='number'?v.toFixed(d):v);}
- const FARM_FIELDS=[['🌡','空气温度','airTemp','°C',1],['◉','空气湿度','airHum','%RH',1],['☁','CO₂ 浓度','co2','ppm',0],['☀','光照强度','lux','lux',0],['💧','土壤水分','soilMoist','%',1],['🌱','土壤温度','soilTemp','°C',1],['⚗','土壤 PH','soilPH','',2],['⌁','土壤 EC','soilEc','dS/m',2],['≋','瞬时风速','windSpeed','m/s',1],['◆','土壤氮 (N)','n','mg/kg',0],['◆','土壤磷 (P)','p','mg/kg',0],['◆','土壤钾 (K)','k','mg/kg',0],['☂','雨量','rainMm','mm/24h',1]];
+ const FARM_FIELDS=[['🌡','空气温度','airTemp','°C',1],['◉','空气湿度','airHum','%RH',1],['☁','CO₂ 浓度','co2','ppm',0],['☀','光照强度','lux','lux',0],['💧','土壤水分','soilMoist','%',1],['🌱','土壤温度','soilTemp','°C',1],['⚗','土壤 PH','soilPH','',2],['≋','瞬时风速','windSpeed','m/s',1],['◆','土壤氮 (N)','n','mg/kg',0],['◆','土壤磷 (P)','p','mg/kg',0],['◆','土壤钾 (K)','k','mg/kg',0],['☂','雨量','rainMm','mm/24h',1]];
 let farmWeatherData=null;
  function arrangeFarmPanels(){const left=document.querySelector('.farm-left'),right=document.querySelector('.farm-right'),weather=document.querySelector('.farm-weather'),device=document.querySelector('.farm-device');if(left&&right&&weather&&weather.parentElement!==left)left.appendChild(weather);if(left&&right&&device&&device.parentElement!==right)right.insertBefore(device,right.firstElementChild);}
 function setViewMode(mode){const farm=mode==='farm',recordButton=$('recordBtn'),recordTarget=$(farm?'farmHeaderActions':'classicHeaderActions');document.body.classList.toggle('farm-mode',farm);if(recordButton&&recordTarget)recordTarget.prepend(recordButton);localStorage.setItem('zhirun-view',mode);if(farm){arrangeFarmPanels();renderFarm(lastData);loadValve();loadWeather();}}
@@ -937,10 +936,10 @@ let modelData={};
 window.ZHIRUN_UI_BUILD='20260830-model-reason-v3';
 function modelNumber(value,digits=1){const number=Number(value);return Number.isFinite(number)?number.toFixed(digits):'--';}
 function syncModelSensor(){
-  const values={modelSoilMoist:['soilMoist',1],modelSoilTemp:['soilTemp',1],modelSoilEc:['soilEc',2],modelSoilPh:['soilPH',1],modelN:['n',0],modelP:['p',0],modelK:['k',0],modelRain:['rainMm',1],modelAirTemp:['airTemp',1],modelAirHum:['airHum',1],modelWind:['windSpeed',1],modelLux:['lux',0]};
+  const values={modelSoilMoist:['soilMoist',1],modelSoilTemp:['soilTemp',1],modelSoilPh:['soilPH',1],modelN:['n',0],modelP:['p',0],modelK:['k',0],modelRain:['rainMm',1],modelAirTemp:['airTemp',1],modelAirHum:['airHum',1],modelWind:['windSpeed',1],modelLux:['lux',0]};
   Object.entries(values).forEach(([id,entry])=>{const el=$(id);if(el)el.textContent=modelNumber(modelData[entry[0]],entry[1]);});
-  const zeroSoilFrame=['soilMoist','soilEc','n','p','k'].every(key=>Number(modelData[key])===0);
-  if(zeroSoilFrame)['modelSoilMoist','modelSoilEc','modelSoilPh','modelN','modelP','modelK'].forEach(id=>{const el=$(id);if(el){el.textContent='无效';el.title='传感器返回全零帧，模型改用区域先验';}});
+  const zeroSoilFrame=['soilMoist','n','p','k'].every(key=>Number(modelData[key])===0);
+  if(zeroSoilFrame)['modelSoilMoist','modelSoilPh','modelN','modelP','modelK'].forEach(id=>{const el=$(id);if(el){el.textContent='无效';el.title='传感器返回全零帧，模型改用区域先验';}});
 }
 function inferBase(){
   return publicServiceBase()+'/fertigation';
@@ -972,7 +971,7 @@ function renderModelResult(payload){
   const pumpRows=[['N',pumps.N_PUMP],['P₂O₅',pumps.P_PUMP],['K₂O',pumps.K_PUMP]].map(item=>'<div><span>'+item[0]+' 母液</span><b>'+modelNumber(item[1]?.target_solution_l,3)+' L</b></div>').join('');
   const phaseRows=(job.phases||[]).map(phase=>'<div><span>'+PHASE_NAMES[phase.state]+'</span><b>'+activeOutputs(phase)+' · '+phaseTarget(phase)+'</b></div>').join('');
   const soilFallback=String(auto.source?.soil_sensor||'').includes('invalid_zero_frame');
-  const forecastRows='<div><span>生育阶段</span><b>'+String(t.stage||'--')+'</b></div><div><span>根区水分</span><b>'+modelNumber(t.root_zone_moisture_pct,1)+'%</b></div><div><span>土壤 pH / EC</span><b>'+modelNumber(auto.soil_ph,1)+' / '+modelNumber(auto.soil_ec_ds_m,2)+' dS/m</b></div><div><span>土壤输入</span><b>'+(soilFallback?'环境估计与区域先验（传感器零帧）':'实时传感器')+'</b></div><div><span>未来 2 日雨量</span><b>'+modelNumber(forecast.rain_next_2d_mm,1)+' mm</b></div><div><span>未来日均 ET₀</span><b>'+modelNumber(forecast.eto_daily_mm,1)+' mm</b></div><div><span>未来最大风速</span><b>'+modelNumber(forecast.wind_max_m_s,2)+' m/s</b></div>';
+    const forecastRows='<div><span>生育阶段</span><b>'+String(t.stage||'--')+'</b></div><div><span>根区水分</span><b>'+modelNumber(t.root_zone_moisture_pct,1)+'%</b></div><div><span>土壤 pH</span><b>'+modelNumber(auto.soil_ph,1)+'</b></div><div><span>土壤输入</span><b>'+(soilFallback?'环境估计与区域先验（传感器零帧）':'实时传感器')+'</b></div><div><span>未来 2 日雨量</span><b>'+modelNumber(forecast.rain_next_2d_mm,1)+' mm</b></div><div><span>未来日均 ET₀</span><b>'+modelNumber(forecast.eto_daily_mm,1)+' mm</b></div><div><span>未来最大风速</span><b>'+modelNumber(forecast.wind_max_m_s,2)+' m/s</b></div>';
   const alerts=(t.alerts||[]).length?(t.alerts||[]).join('；'):'安全门通过，无附加告警';
   const executable=Object.values(modelJobParams(payload)).some(value=>value>0);
   const executionStatus=String(t.execution_status||(executable?'ready':(t.irrigate?'safety_blocked':'not_needed'))),executionReason=String(t.execution_reason||'');
@@ -988,7 +987,7 @@ async function predict(){
   if(invalid){$('mOut').textContent='请填写有效的 N、P₂O₅、K₂O 母液浓度';return null;}
   $('predictBtn').disabled=true;$('mOut').textContent='服务器正在运行 V2 模型…';$('modelResult').classList.remove('has-result');
   try{
-    const body={n_concentration_g_l:numeric('nConcentration'),p_concentration_g_l:numeric('pConcentration'),k_concentration_g_l:numeric('kConcentration'),airTemp:lastData.airTemp,airHum:lastData.airHum,co2:lastData.co2,soilMoist:lastData.soilMoist,soilTemp:lastData.soilTemp,soilPH:lastData.soilPH,soilEc:lastData.soilEc,n:lastData.n,p:lastData.p,k:lastData.k,windSpeed:lastData.windSpeed,lux:lastData.lux,rainMm:lastData.rainMm,latitude:lastData.latitude,longitude:lastData.longitude};
+    const body={n_concentration_g_l:numeric('nConcentration'),p_concentration_g_l:numeric('pConcentration'),k_concentration_g_l:numeric('kConcentration'),airTemp:lastData.airTemp,airHum:lastData.airHum,co2:lastData.co2,soilMoist:lastData.soilMoist,soilTemp:lastData.soilTemp,soilPH:lastData.soilPH,n:lastData.n,p:lastData.p,k:lastData.k,windSpeed:lastData.windSpeed,lux:lastData.lux,rainMm:lastData.rainMm,latitude:lastData.latitude,longitude:lastData.longitude};
     const r=await fetch(base+'/predict',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d=await r.json();
     if(!d.ok)throw new Error(d.error||'模型计算失败');

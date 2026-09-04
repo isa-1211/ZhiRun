@@ -261,7 +261,7 @@ def read_sensors(config, bus, cache=None):
     soil = read_with_retry(config, bus, int_value(config, "ZHIRUN_SOIL_ADDR"), 0, 7)
     if soil:
         soil_values = {"soilMoist": soil[0] / 10.0, "soilTemp": signed16(soil[1]) / 10.0,
-                       "soilEc": soil[2] / 1000.0, "soilPH": soil[3] / 10.0,
+                       "soilPH": soil[3] / 10.0,
                        "n": soil[4], "p": soil[5], "k": soil[6]}
         data.update(soil_values)
         cache["soil"] = {"values": soil_values, "at": time.monotonic()}

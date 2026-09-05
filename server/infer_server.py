@@ -472,7 +472,7 @@ def assess_farm_condition(body):
             ],
         },
         "model": {
-            "crop": decision.get("crop"), "stage": decision.get("stage"),
+            "stage": decision.get("stage"),
             "execution_status": decision.get("execution_status"),
             "execution_reason": decision.get("execution_reason"),
             "relative_field_capacity": relative_fc,
@@ -481,6 +481,19 @@ def assess_farm_condition(body):
             "alerts": decision.get("alerts") or [],
         },
     }
+
+
+def public_model_payload(value):
+    """Hide installation-profile fields that were not supplied by the user."""
+    if isinstance(value, dict):
+        return {
+            key: public_model_payload(item)
+            for key, item in value.items()
+            if key not in {"crop", "area_mu"}
+        }
+    if isinstance(value, list):
+        return [public_model_payload(item) for item in value]
+    return value
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -509,8 +522,6 @@ class Handler(BaseHTTPRequestHandler):
                 "schema": "fertigation_v2_automatic_environment",
                 "model_dir": MODEL_DIR,
                 "manual_inputs": ["N_g_L", "P2O5_g_L", "K2O_g_L"],
-                "crop": "玉米",
-                "area_mu": 1.0,
             })
         else:
             self.send_json(404, {"error": "not_found"})
@@ -526,7 +537,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(200, assess_farm_condition(body))
                 return
             decision, result = decide(body)
-            self.send_json(200, {"ok": True, "decision": decision, "result": result})
+            self.send_json(200, {"ok": True,
+                                 "decision": public_model_payload(decision),
+                                 "result": public_model_payload(result)})
         except Exception as exc:
             self.send_json(400, {"ok": False, "error": str(exc)})
 

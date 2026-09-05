@@ -355,12 +355,26 @@ def weather_forecast(latitude, longitude):
 
     query = (
         "https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
-        "&current=temperature_2m,relative_humidity_2m,apparent_temperature,"
-        "precipitation,weather_code,wind_speed_10m"
-        "&hourly=temperature_2m,precipitation_probability,weather_code,wind_speed_10m"
+        "&current=temperature_2m,relative_humidity_2m,dew_point_2m,"
+        "apparent_temperature,precipitation,rain,showers,snowfall,weather_code,"
+        "cloud_cover,pressure_msl,surface_pressure,wind_speed_10m,"
+        "wind_direction_10m,wind_gusts_10m,is_day,uv_index,uv_index_clear_sky,"
+        "visibility,evapotranspiration,et0_fao_evapotranspiration,"
+        "vapour_pressure_deficit"
+        "&hourly=temperature_2m,relative_humidity_2m,dew_point_2m,"
+        "apparent_temperature,precipitation_probability,precipitation,rain,"
+        "showers,snowfall,snow_depth,weather_code,pressure_msl,surface_pressure,"
+        "cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,visibility,"
+        "evapotranspiration,et0_fao_evapotranspiration,vapour_pressure_deficit,"
+        "wind_speed_10m,wind_speed_80m,wind_direction_10m,wind_direction_80m,"
+        "wind_gusts_10m,uv_index,uv_index_clear_sky,is_day,sunshine_duration"
         "&daily=weather_code,temperature_2m_max,temperature_2m_min,"
-        "precipitation_probability_max,precipitation_sum,wind_speed_10m_max,"
-        "sunrise,sunset&timezone=auto&forecast_days=7"
+        "apparent_temperature_max,apparent_temperature_min,sunrise,sunset,"
+        "daylight_duration,sunshine_duration,uv_index_max,uv_index_clear_sky_max,"
+        "precipitation_sum,rain_sum,showers_sum,snowfall_sum,precipitation_hours,"
+        "precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max,"
+        "wind_direction_10m_dominant,shortwave_radiation_sum,"
+        "et0_fao_evapotranspiration&timezone=auto&forecast_days=7"
     ).format(lat=latitude, lon=longitude)
     request = Request(query, headers={"User-Agent": "ZhiRun-WeatherPanel/1.0"})
     try:
@@ -392,8 +406,11 @@ def weather_forecast(latitude, longitude):
         "latitude": latitude,
         "longitude": longitude,
         "current": payload.get("current", {}),
+        "current_units": payload.get("current_units", {}),
         "hourly": payload.get("hourly", {}),
+        "hourly_units": payload.get("hourly_units", {}),
         "daily": payload.get("daily", {}),
+        "daily_units": payload.get("daily_units", {}),
         "timezone": payload.get("timezone", ""),
         "updated_at": now(),
     }

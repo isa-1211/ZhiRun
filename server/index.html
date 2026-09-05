@@ -56,11 +56,11 @@
   .weather-overview>.weather-section-title{margin:12px 0 8px}.weather-hero{display:grid;grid-template-columns:minmax(340px,1.25fr) minmax(480px,1fr);gap:18px;align-items:stretch;margin:0}
   .weather-current{padding:8px 18px 8px 0;display:flex;flex-direction:column;justify-content:center}
   .weather-place{font-size:12px;color:var(--muted);margin-bottom:8px}.weather-now{font-size:44px;font-weight:800;color:#eafff6;line-height:1}.weather-desc{font-size:14px;color:var(--accdim);margin-top:7px}
-  .weather-detail{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.weather-detail div{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:82px;border:1px solid var(--line);border-radius:7px;background:linear-gradient(160deg,var(--panel),var(--panel2));padding:10px 8px}.weather-detail span{color:var(--muted);font-size:12px;margin-bottom:7px}.weather-detail b{font-size:18px;color:#e6ebf5}
+  .weather-detail{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;max-height:250px;overflow:auto;padding-right:2px}.weather-detail div{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:72px;border:1px solid var(--line);border-radius:7px;background:linear-gradient(160deg,var(--panel),var(--panel2));padding:9px 8px}.weather-detail span{color:var(--muted);font-size:11px;margin-bottom:6px;text-align:center}.weather-detail b{font-size:16px;color:#e6ebf5;text-align:center;word-break:break-word}.weather-data-title{margin:14px 0 8px;font-size:13px;color:var(--muted);font-weight:700}.weather-data-table-wrap{width:100%;overflow:auto;border-top:1px solid var(--line);border-bottom:1px solid var(--line);-webkit-overflow-scrolling:touch}.weather-data-table{border-collapse:collapse;min-width:920px;width:100%;font-size:11px}.weather-data-table th,.weather-data-table td{padding:7px 9px;border-right:1px solid var(--line2);border-bottom:1px solid var(--line2);text-align:right;white-space:nowrap}.weather-data-table th:first-child,.weather-data-table td:first-child{position:sticky;left:0;text-align:left;background:var(--panel2);z-index:1;color:#dce6f4}.weather-data-table th{color:var(--muted);font-weight:700;background:var(--panel2)}.weather-data-table td{color:#dce6f4}.weather-data-table .weather-code-cell{text-align:left}.weather-complete{display:flex;flex-direction:column;min-height:0}.weather-complete .weather-data-table-wrap{max-height:280px}.weather-hourly-complete{margin-top:12px}.weather-daily-complete{margin-top:14px}
   .hourly-strip{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(96px,1fr);overflow-x:auto;scrollbar-color:#30445d transparent}.hour-card{text-align:center;padding:5px 9px;border-right:1px solid var(--line2);min-height:78px}.hour-card:last-child{border-right:0}.hour-card .ht{font-size:11px;color:var(--muted)}.hour-card .hi{font-size:18px;margin:3px 0}.hour-card .hv{font-size:14px;font-weight:700;color:#eafff6}.hour-card .hr{font-size:10px;color:#72bde1;margin-top:3px;white-space:nowrap}.weather-chart{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:12px 4px 5px;flex:1 1 auto;min-height:0;display:flex;flex-direction:column}.weather-chart #weatherChart{flex:1 1 auto;min-height:0}.weather-chart svg{display:block;width:100%;height:100%;min-height:220px}.chart-legend{display:flex;gap:18px;color:var(--muted);font-size:12px;margin:0 5px 6px;flex:0 0 auto}.chart-legend i{display:inline-block;width:18px;height:3px;margin-right:6px;vertical-align:middle;border-radius:2px}.forecast{border-top:1px solid var(--line);flex:1 1 auto;min-height:0;overflow:hidden;display:grid;grid-template-rows:repeat(7,minmax(0,1fr))}.forecast-day{display:grid;grid-template-columns:76px minmax(86px,1fr) 90px minmax(100px,auto);align-items:center;gap:8px;padding:5px 3px;border-bottom:1px solid var(--line2)}.forecast-day:first-child{background:rgba(83,199,167,.055)}.forecast-day .day{color:var(--muted);font-size:11px}.forecast-day .code{font-size:12px;color:#cfe3dc}.forecast-day .temps{font-size:15px;font-weight:800;color:#eafff6;white-space:nowrap}.forecast-day .temps span{font-size:11px;color:var(--muted);font-weight:500}.forecast-day .rain{font-size:11px;color:#9fb6d6;text-align:right;white-space:nowrap}
   .weather-status{min-height:22px;color:var(--dim);font-size:13px;margin:4px 2px 0}
   @media(max-width:1180px){#p-weather.panel.active{height:auto}.weather-content{grid-template-columns:1fr;grid-template-areas:"overview" "trend" "forecast";grid-template-rows:auto}.weather-hero{grid-template-columns:minmax(280px,.8fr) minmax(460px,1.2fr)}.weather-chart{min-height:300px}.weather-chart svg{height:280px}.forecast{overflow:visible;grid-template-rows:none}.forecast-day{min-height:48px;grid-template-columns:90px minmax(110px,1fr) 100px minmax(120px,auto)}}
-  @media(max-width:720px){.weather-hero{grid-template-columns:1fr}.weather-current{padding-bottom:12px}.weather-detail{grid-template-columns:repeat(3,1fr);gap:8px}.weather-detail div{min-height:70px;padding:8px 4px}.weather-now{font-size:38px}.weather-chart{min-height:250px}.weather-chart svg{height:220px}.forecast-day{grid-template-columns:68px 1fr 82px}.forecast-day .rain{grid-column:2/4;text-align:left}}
+  @media(max-width:720px){.weather-hero{grid-template-columns:1fr}.weather-current{padding-bottom:12px}.weather-detail{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:none}.weather-detail div{min-height:66px;padding:8px 4px}.weather-now{font-size:38px}.weather-chart{min-height:250px}.weather-chart svg{height:220px}.forecast-day{grid-template-columns:68px 1fr 82px}.forecast-day .rain{grid-column:2/4;text-align:left}.weather-data-table{min-width:760px}.weather-complete .weather-data-table-wrap{max-height:340px}}
   /* 数据页特例: 让面板+网格撑满整个可视区, 卡片等高铺满 */
   #p-data.panel.active{display:flex;flex-direction:column;height:100%}
   h2{font-size:14px;color:var(--muted);margin:16px 2px 10px;font-weight:600}
@@ -337,15 +337,17 @@
       <section class="weather-overview">
         <div class="weather-hero">
           <div class="weather-current"><div class="weather-place" id="weatherPlace">等待北斗定位</div><div class="weather-now" id="weatherTemp">--</div><div class="weather-desc" id="weatherDesc">未获得经纬度</div></div>
-          <div class="weather-detail"><div><span>体感温度</span><b id="weatherFeel">--</b></div><div><span>相对湿度</span><b id="weatherHum">--</b></div><div><span>风速</span><b id="weatherWind">--</b></div></div>
+          <div class="weather-detail" id="weatherCurrentDetails"><div><span>当前天气</span><b>--</b></div></div>
         </div>
         <div class="weather-section-title">未来 24 小时</div><div class="hourly-strip" id="hourlyForecast"></div>
+        <div class="weather-complete weather-hourly-complete"><div class="weather-data-title">逐小时完整接口数据（可横向滑动）</div><div class="weather-data-table-wrap" id="hourlyAllTable"></div></div>
       </section>
       <section class="weather-trend">
         <div class="weather-section-title">未来 7 日温度与降水趋势</div><div class="weather-chart"><div class="chart-legend"><span><i style="background:#ff9b66"></i>最高温</span><span><i style="background:#66b7ff"></i>最低温</span><span><i style="height:10px;background:#397ea8"></i>预计降水量</span></div><div id="weatherChart"></div></div>
       </section>
       <section class="weather-forecast-section">
         <div class="weather-section-title">未来 7 日</div><div class="forecast" id="forecast"></div>
+        <div class="weather-complete weather-daily-complete"><div class="weather-data-title">逐日完整接口数据</div><div class="weather-data-table-wrap" id="dailyAllTable"></div></div>
       </section>
     </div>
     <div class="weather-status" id="weatherStatus">等待定位数据</div>
@@ -730,6 +732,31 @@ function renderWeatherChart(daily){
   labels.forEach((v,i)=>{const day=v.slice(5).replace('-','/');svg+='<text x="'+x(i)+'" y="'+(H-13)+'" fill="#8fa3c0" font-size="12" text-anchor="middle">'+day+'</text><text x="'+x(i)+'" y="'+(T+12)+'" fill="#72bde1" font-size="10" text-anchor="middle">'+(prob[i]??'--')+'%</text><circle cx="'+x(i)+'" cy="'+y(hi[i])+'" r="4" fill="#ff9b66"><title>最高 '+hi[i]+'°C</title></circle><circle cx="'+x(i)+'" cy="'+y(lo[i])+'" r="4" fill="#66b7ff"><title>最低 '+lo[i]+'°C</title></circle>';});
   $('weatherChart').innerHTML=svg+'</svg>';
 }
+const WEATHER_LABELS={time:'时间',interval:'计算间隔',temperature_2m:'气温 2m',relative_humidity_2m:'相对湿度 2m',dew_point_2m:'露点温度',apparent_temperature:'体感温度',precipitation_probability:'降水概率',precipitation:'降水量',rain:'雨量',showers:'阵雨',snowfall:'降雪',snow_depth:'积雪深度',weather_code:'天气代码',cloud_cover:'总云量',cloud_cover_low:'低云量',cloud_cover_mid:'中云量',cloud_cover_high:'高云量',pressure_msl:'海平面气压',surface_pressure:'地面气压',wind_speed_10m:'10m 风速',wind_speed_80m:'80m 风速',wind_direction_10m:'10m 风向',wind_direction_80m:'80m 风向',wind_gusts_10m:'10m 阵风',visibility:'能见度',is_day:'昼夜',uv_index:'紫外线指数',uv_index_clear_sky:'晴空紫外线',sunshine_duration:'日照时长',evapotranspiration:'蒸散量',et0_fao_evapotranspiration:'参考 ET₀',vapour_pressure_deficit:'水汽压亏缺',temperature_2m_max:'最高气温',temperature_2m_min:'最低气温',apparent_temperature_max:'最高体感温度',apparent_temperature_min:'最低体感温度',sunrise:'日出',sunset:'日落',daylight_duration:'白昼时长',uv_index_max:'最高紫外线指数',uv_index_clear_sky_max:'晴空最高紫外线',precipitation_sum:'总降水量',rain_sum:'总雨量',showers_sum:'总阵雨量',snowfall_sum:'总降雪量',precipitation_hours:'降水小时数',precipitation_probability_max:'最高降水概率',wind_speed_10m_max:'最大风速',wind_gusts_10m_max:'最大阵风',wind_direction_10m_dominant:'主导风向',shortwave_radiation_sum:'短波辐射总量'};
+function weatherLabel(key){return WEATHER_LABELS[key]||key;}
+function weatherEscape(value){return String(value??'--').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function weatherValue(key,value,unit){
+  if(value===null||value===undefined||value==='')return '--';
+  if(key==='weather_code')return weatherEscape(value)+' · '+weatherText(Number(value));
+  if(key==='is_day')return Number(value)===1?'白天':'夜间';
+  if(key.includes('wind_direction'))return weatherEscape(value)+'°';
+  if(typeof value==='number')return weatherEscape(Number.isInteger(value)?value:Number(value).toFixed(Math.abs(value)>=100?0:1))+(unit?' '+weatherEscape(unit):'');
+  return weatherEscape(value);
+}
+function renderWeatherCurrent(current,units){
+  const box=$('weatherCurrentDetails');if(!box)return;
+  const keys=Object.keys(current||{}).filter(key=>key!=='time'&&key!=='interval');
+  box.innerHTML=keys.map(key=>'<div><span>'+weatherEscape(weatherLabel(key))+'</span><b>'+weatherValue(key,current[key],units?.[key]||'')+'</b></div>').join('')||'<div><span>当前天气</span><b>--</b></div>';
+}
+function renderWeatherTable(targetId,series,units,limit){
+  const box=$(targetId);if(!box)return;
+  const keys=Object.keys(series||{}).filter(key=>key!=='time'&&key!=='interval'&&Array.isArray(series[key]));
+  const times=Array.isArray(series?.time)?series.time.slice(0,limit):[];
+  if(!keys.length||!times.length){box.innerHTML='<div class="empty">暂无接口数据</div>';return;}
+  const head=times.map(value=>'<th>'+weatherEscape(String(value).replace('T',' '))+'</th>').join('');
+  const rows=keys.map(key=>'<tr><th>'+weatherEscape(weatherLabel(key))+(units?.[key]?' <small>('+weatherEscape(units[key])+')</small>':'')+'</th>'+times.map((_,i)=>'<td class="'+(key==='weather_code'?'weather-code-cell':'')+'">'+weatherValue(key,series[key]?.[i],units?.[key]||'')+'</td>').join('')+'</tr>').join('');
+  box.innerHTML='<table class="weather-data-table"><thead><tr><th>参数</th>'+head+'</tr></thead><tbody>'+rows+'</tbody></table>';
+}
 async function loadWeather(){
   const status=$('weatherStatus');
   status.textContent='正在更新天气预报…';
@@ -741,19 +768,19 @@ async function loadWeather(){
       if($('farmWeatherDesc'))$('farmWeatherDesc').textContent=status.textContent;
       return;
     }
-    const c=d.current||{}, hourly=d.hourly||{}, daily=d.daily||{};
+    const c=d.current||{}, hourly=d.hourly||{}, daily=d.daily||{}, currentUnits=d.current_units||{}, hourlyUnits=d.hourly_units||{}, dailyUnits=d.daily_units||{};
     farmWeatherData=d;
     const locationLabel=d.location_source==='fallback'?'呼和浩特（备用位置）':(d.location_source==='gnss_history'?'设备最近定位':'设备实时定位');
     $('weatherPlace').textContent=locationLabel+' · '+Number(d.latitude).toFixed(5)+'°, '+Number(d.longitude).toFixed(5)+'°'+(d.timezone?' · '+d.timezone:'');
     $('weatherTemp').textContent=weatherNum(c.temperature_2m,'°C',1);
     $('weatherDesc').textContent=weatherText(c.weather_code)+(c.precipitation?(' · 降水 '+weatherNum(c.precipitation,' mm',1)): '');
-    $('weatherFeel').textContent=weatherNum(c.apparent_temperature,'°C',1);
-    $('weatherHum').textContent=weatherNum(c.relative_humidity_2m,'%',0);
-    $('weatherWind').textContent=weatherNum(c.wind_speed_10m,' km/h',1);
+    renderWeatherCurrent(c,currentUnits);
+    renderWeatherTable('hourlyAllTable',hourly,hourlyUnits,24);
     const ht=hourly.time||[],hc=hourly.weather_code||[],hTemp=hourly.temperature_2m||[],hRain=hourly.precipitation_probability||[],hWind=hourly.wind_speed_10m||[];let start=ht.findIndex(t=>new Date(t).getTime()>=Date.now()-3600000);if(start<0)start=0;const hours=[];for(let i=start;i<Math.min(ht.length,start+24);i+=3)hours.push('<div class="hour-card"><div class="ht">'+ht[i].slice(11,16)+'</div><div class="hi">'+weatherIcon(hc[i])+'</div><div class="hv">'+weatherNum(hTemp[i],'°',0)+'</div><div class="hr">降雨 '+weatherNum(hRain[i],'%',0)+' · 风 '+weatherNum(hWind[i],'',0)+'</div></div>');$('hourlyForecast').innerHTML=hours.join('');
     const dates=daily.time||[], codes=daily.weather_code||[], highs=daily.temperature_2m_max||[], lows=daily.temperature_2m_min||[], rains=daily.precipitation_probability_max||[], rainSum=daily.precipitation_sum||[];
     renderWeatherChart(daily);
     $('forecast').innerHTML=dates.map((date,i)=>'<div class="forecast-day"><div class="day">'+date+'</div><div class="code">'+weatherIcon(codes[i])+' '+weatherText(codes[i])+'</div><div class="temps">'+weatherNum(highs[i],'°',0)+' <span>/ '+weatherNum(lows[i],'°',0)+'</span></div><div class="rain">概率 '+weatherNum(rains[i],'%',0)+' · '+weatherNum(rainSum[i],' mm',1)+'</div></div>').join('');
+    renderWeatherTable('dailyAllTable',daily,dailyUnits,7);
     renderFarmWeather(d);
     status.textContent=(d.location_source==='fallback'?'北斗尚未定位，当前使用呼和浩特备用位置 · ':'')+'预报更新时间 '+new Date(d.updated_at*1000).toLocaleTimeString();
   }catch(e){status.textContent='天气服务连接失败，稍后自动重试。';if($('farmWeatherDesc'))$('farmWeatherDesc').textContent='天气服务暂不可用';}

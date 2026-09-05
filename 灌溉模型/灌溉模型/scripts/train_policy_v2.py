@@ -28,14 +28,13 @@ OUT = ROOT / "data" / "processed" / "policy_v2_samples.csv.gz"
 MODEL = ROOT / "models" / "hohhot_fertigation_policy_v2.joblib"
 METRICS = ROOT / "models" / "policy_v2_metrics.json"
 
-CATEGORICAL = ["crop", "stage", "soil_n_level", "soil_p_level", "soil_k_level", "soil_profile"]
+CATEGORICAL = ["crop", "stage", "soil_n_level", "soil_p_level", "soil_k_level"]
 NUMERIC = [
     "doy", "t_mean", "t_max", "t_min", "rh", "wind", "radiation", "rain_today",
     "rain_next_2d", "eto", "gdd10_14d", "rain_7d", "eto_7d", "dry_days",
-    "field_capacity", "moisture20", "moisture40", "moisture60", "soil_ec",
-    "soil_ph", "soc_g_kg", "soil_n_g_kg", "sand_pct", "clay_pct", "bulk_density",
+    "soil_moisture_pct", "moisture_trigger_pct", "moisture_target_pct", "soil_ec", "soil_ph",
     "days_since_fertigation", "n_applied_stage", "p_applied_stage", "k_applied_stage",
-    "root_depth", "root_moisture", "relative_fc", "trigger_fc", "target_fc", "kc",
+    "kc",
     "n_remaining", "p_remaining", "k_remaining", "n_level_factor", "p_level_factor", "k_level_factor",
     "fertilizer_interval_ready", "ec_block", "latitude", "longitude", "co2_ppm",
     "soil_temperature_c", "soil_n_mg_kg", "soil_p_mg_kg", "soil_k_mg_kg", "light_lux", "rain_24h_mm",
@@ -55,13 +54,6 @@ def stage_for(crop: str, doy: int) -> str | None:
         if start <= doy <= end:
             return stage
     return None
-
-
-def estimate_fc(profile: dict) -> float:
-    """简化土壤转换函数，只用于生成区域情景，结果限制在合理体积含水率范围。"""
-    soc_pct = profile["soc_g_kg"] / 10
-    fc = 10.0 + 0.32 * profile["clay_pct"] + 0.12 * (100 - profile["sand_pct"] - profile["clay_pct"]) + 1.5 * soc_pct
-    return float(np.clip(fc, 18.0, 34.0))
 
 
 def fao56_eto(row: pd.Series, latitude: float = 40.72, elevation: float = 1070.0) -> float:
@@ -108,7 +100,6 @@ def build_samples(seed: int = 42) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     weather = weather_features()
     records = []
-    moisture_ratios = [0.52, 0.60, 0.67, 0.72, 0.78, 0.86, 0.94]
     levels = ["low", "medium", "high"]
     for date, w in weather.iterrows():
         doy = date.dayofyear
@@ -117,12 +108,9 @@ def build_samples(seed: int = 42) -> pd.DataFrame:
             if stage is None:
                 continue
             for profile in SOILS:
-                fc = estimate_fc(profile)
-                # 每个真实天气×作物×土壤点抽取两个可复现传感器/土检情景。
+                # 每个真实天气×作物×土壤点抽取两个可复现单探针/土检情景。
                 for scenario in range(2):
-                    ratio = moisture_ratios[(doy + scenario * 3 + len(crop) + int(profile["longitude"] * 10)) % len(moisture_ratios)]
-                    noise = rng.normal(0, 0.7, 3)
-                    moisture = np.clip(fc * ratio + noise, 4, fc * 1.05)
+                    moisture = float(np.clip(18 + 48 * ((doy + scenario * 3 + len(crop)) % 11) / 10 + rng.normal(0, 1.2), 2, 95))
                     n_level = levels[(doy + scenario) % 3]
                     p_level = levels[(doy // 3 + scenario) % 3]
                     k_level = levels[(doy // 5 + scenario) % 3]
@@ -133,26 +121,21 @@ def build_samples(seed: int = 42) -> pd.DataFrame:
                     p_applied = CONFIG["crops"][crop]["season_p2o5_kg_mu"] * stage_cfg["p_share"] * applied_fraction
                     k_applied = CONFIG["crops"][crop]["season_k2o_kg_mu"] * stage_cfg["k_share"] * applied_fraction
                     soil_ec = float(np.clip(0.45 + 0.12 * (profile["ph"] - 7) + rng.normal(0, 0.35), 0.2, 2.8))
-                    d = recommend(crop, stage, moisture.tolist(), fc, float(w.rain_next_2d), float(w.eto), days,
+                    d = recommend(crop, stage, moisture, float(w.rain_next_2d), float(w.eto), days,
                                   soil_ec, n_applied, p_applied, k_applied, n_level, p_level, k_level)
-                    weights = np.array([0.55, 0.30, 0.15]) if stage_cfg["root_depth_m"] >= 0.6 else np.array([0.7, 0.3, 0.0])
-                    root_moisture = float(np.dot(moisture, weights) / weights.sum())
                     factors = {"low": 1.0, "medium": 0.65, "high": 0.0}
                     records.append({
-                        "date": date, "year": date.year, "crop": crop, "stage": stage, "soil_profile": profile["name"],
+                        "date": date, "year": date.year, "crop": crop, "stage": stage,
                         "doy": doy, "t_mean": w.T2M, "t_max": w.T2M_MAX, "t_min": w.T2M_MIN, "rh": w.RH2M,
                         "wind": w.WS2M, "radiation": w.ALLSKY_SFC_SW_DWN, "rain_today": w.PRECTOTCORR,
                         "rain_next_2d": w.rain_next_2d, "eto": w.eto, "gdd10_14d": w.gdd10_14d,
                         "rain_7d": w.rain_7d, "eto_7d": w.eto_7d, "dry_days": w.dry_days,
-                        "field_capacity": fc, "moisture20": moisture[0], "moisture40": moisture[1], "moisture60": moisture[2],
-                        "soil_ec": soil_ec, "soil_ph": profile["ph"], "soc_g_kg": profile["soc_g_kg"],
-                        "soil_n_g_kg": profile["nitrogen_g_kg"], "sand_pct": profile["sand_pct"], "clay_pct": profile["clay_pct"],
-                    "bulk_density": profile["bulk_density"], "soil_n_level": n_level, "soil_p_level": p_level,
+                        "soil_moisture_pct": moisture, "moisture_trigger_pct": stage_cfg["trigger_moisture_pct"],
+                        "moisture_target_pct": stage_cfg["target_moisture_pct"], "soil_ec": soil_ec,
+                        "soil_ph": profile["ph"], "soil_n_level": n_level, "soil_p_level": p_level,
                         "soil_k_level": k_level, "days_since_fertigation": days, "n_applied_stage": n_applied,
                         "p_applied_stage": p_applied, "k_applied_stage": k_applied,
-                        "root_depth": stage_cfg["root_depth_m"], "root_moisture": root_moisture,
-                        "relative_fc": root_moisture / fc, "trigger_fc": stage_cfg["trigger_fc"],
-                        "target_fc": stage_cfg["target_fc"], "kc": stage_cfg["kc"],
+                        "kc": stage_cfg["kc"],
                         "n_remaining": d["stage_n_remaining_before_this_job_kg_mu"],
                         "p_remaining": d["stage_p2o5_remaining_before_this_job_kg_mu"],
                         "k_remaining": d["stage_k2o_remaining_before_this_job_kg_mu"],
@@ -205,12 +188,12 @@ def main() -> None:
     model.fit(train[CATEGORICAL + NUMERIC], train[TARGETS])
     metrics = {
         "model_kind": "ExtraTrees multi-output policy distillation",
-        "label_origin": "FAO-56 water balance + crop-stage N/P/K budgets + safety interlocks",
+        "label_origin": "单探针土壤水分直接阈值 + crop-stage N/P/K budgets + safety interlocks",
         "not_a_yield_model": True,
         "data_rows": len(data), "train_years": [2015, 2022], "validation_years": [2023], "test_years": [2024, 2025],
         "validation": score_split(model, validation), "test": score_split(model, test),
         "features": CATEGORICAL + NUMERIC, "targets": TARGETS,
-        "sources": ["NASA POWER daily weather", "ISRIC SoilGrids 2.0 regional profiles", "four-crop published agronomic priors"],
+        "sources": ["NASA POWER daily weather", "four-crop published agronomic priors", "single-probe moisture setpoints"],
         "warning": "高分只表示模型能复现规则教师；没有本地产量标签，不能解释为增产效果或最优处方精度。",
     }
     joblib.dump({"pipeline": model, "features": CATEGORICAL + NUMERIC, "targets": TARGETS, "metrics": metrics}, MODEL, compress=3)

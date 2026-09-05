@@ -24,12 +24,12 @@ import pandas as pd
 
 try:
     from .build_job import HARDWARE, build_job
-    from .recommend import CONFIG, recommend, weighted_root_moisture
-    from .train_policy_v2 import CATEGORICAL, NUMERIC, estimate_fc, stage_for
+    from .recommend import CONFIG, recommend
+    from .train_policy_v2 import CATEGORICAL, NUMERIC, stage_for
 except ImportError:  # 允许 `python scripts/run_fertigation_model.py` 直接运行
     from build_job import HARDWARE, build_job
-    from recommend import CONFIG, recommend, weighted_root_moisture
-    from train_policy_v2 import CATEGORICAL, NUMERIC, estimate_fc, stage_for
+    from recommend import CONFIG, recommend
+    from train_policy_v2 import CATEGORICAL, NUMERIC, stage_for
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,7 +38,6 @@ DEFAULT_LONGITUDE = 111.75
 DEFAULT_CROP = "玉米"
 DEFAULT_AREA_MU = 1.0
 MODEL_PATH = ROOT / "models" / "hohhot_fertigation_policy_v2.joblib"
-SOIL_PATH = ROOT / "configs" / "soil_profiles.json"
 WEATHER_PATH = ROOT / "data" / "weather" / "hohhot_nasa_power_daily.csv"
 
 
@@ -108,21 +107,19 @@ class EnvironmentInput:
     air_temperature_c: float = 22.0
     air_humidity_pct: float = 55.0
     co2_ppm: float = 420.0
-    soil_moisture_20_pct: float = 18.0
-    soil_moisture_40_pct: float = 20.0
-    soil_moisture_60_pct: float = 22.0
-    soil_temperature_c: float = 18.0
-    soil_n_mg_kg: float = 1200.0
-    soil_p_mg_kg: float = 20.0
-    soil_k_mg_kg: float = 160.0
+    soil_moisture_pct: float | None = None
+    soil_temperature_c: float | None = None
+    soil_n_mg_kg: float | None = None
+    soil_p_mg_kg: float | None = None
+    soil_k_mg_kg: float | None = None
     wind_speed_m_s: float = 2.0
     light_lux: float = 20000.0
     rain_24h_mm: float = 0.0
     rain_forecast_mm: float = 0.0
     rain_next_2d_mm: float | None = None
     eto_forecast_mm: float = 5.0
-    soil_ph: float = 8.4
-    soil_ec_ds_m: float = 1.0
+    soil_ph: float | None = None
+    soil_ec_ds_m: float | None = None
     days_since_fertigation: int = 8
     observation_time: str | None = None
     weather_forecast: list[dict[str, Any]] = field(default_factory=list)
@@ -133,13 +130,7 @@ class EnvironmentInput:
         lon = _finite(self.longitude, "longitude")
         if not -90 <= lat <= 90 or not -180 <= lon <= 180:
             raise ValueError("经纬度超出范围")
-        bounded = {
-            "air_humidity_pct": (0, 100),
-            "soil_moisture_20_pct": (0, 100),
-            "soil_moisture_40_pct": (0, 100),
-            "soil_moisture_60_pct": (0, 100),
-            "soil_ph": (0, 14),
-        }
+        bounded = {"air_humidity_pct": (0, 100)}
         for name, (low, high) in bounded.items():
             value = _finite(getattr(self, name), name)
             if not low <= value <= high:
@@ -147,19 +138,29 @@ class EnvironmentInput:
         for name in ("co2_ppm", "soil_n_mg_kg", "soil_p_mg_kg",
                      "soil_k_mg_kg", "wind_speed_m_s", "light_lux", "rain_24h_mm",
                      "rain_forecast_mm", "eto_forecast_mm", "soil_ec_ds_m"):
-            _nonnegative(getattr(self, name), name)
-        _finite(self.soil_temperature_c, "soil_temperature_c")
+            value = getattr(self, name)
+            if value is not None:
+                _nonnegative(value, name)
+        for name, low, high in (("soil_moisture_pct", 0, 100), ("soil_ph", 0, 14)):
+            value = getattr(self, name)
+            if value is not None:
+                value = _finite(value, name)
+                if not low <= value <= high:
+                    raise ValueError(f"{name}必须在{low}到{high}之间")
+        if self.soil_temperature_c is not None:
+            _finite(self.soil_temperature_c, "soil_temperature_c")
         if self.rain_next_2d_mm is not None:
             _nonnegative(self.rain_next_2d_mm, "rain_next_2d_mm")
         if int(self.days_since_fertigation) < 0:
             raise ValueError("days_since_fertigation不能为负数")
         numeric_fields = ("latitude", "longitude", "air_temperature_c", "air_humidity_pct", "co2_ppm",
-                          "soil_moisture_20_pct", "soil_moisture_40_pct", "soil_moisture_60_pct",
-                          "soil_temperature_c", "soil_n_mg_kg", "soil_p_mg_kg", "soil_k_mg_kg",
+                          "soil_moisture_pct", "soil_temperature_c", "soil_n_mg_kg", "soil_p_mg_kg", "soil_k_mg_kg",
                           "wind_speed_m_s", "light_lux", "rain_24h_mm", "rain_forecast_mm",
                           "eto_forecast_mm", "soil_ph", "soil_ec_ds_m")
         for name in numeric_fields:
-            object.__setattr__(self, name, _finite(getattr(self, name), name))
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, _finite(value, name))
         if self.rain_next_2d_mm is not None:
             object.__setattr__(self, "rain_next_2d_mm", _finite(self.rain_next_2d_mm, "rain_next_2d_mm"))
         object.__setattr__(self, "days_since_fertigation", int(self.days_since_fertigation))
@@ -244,11 +245,6 @@ class EnvironmentInput:
                     if source == "shortwave_radiation" and value is not None:
                         value = float(value) * 120.0
                     raw[target] = value
-            if "soil_moisture_0_to_1cm" in current:
-                moisture = current["soil_moisture_0_to_1cm"]
-                if moisture is not None:
-                    for target in ("soil_moisture_20_pct", "soil_moisture_40_pct", "soil_moisture_60_pct"):
-                        raw.setdefault(target, float(moisture) * 100.0)
         if isinstance(raw.get("daily"), Mapping) and "weather_forecast" not in raw:
             raw["weather_forecast"] = raw.pop("daily")
         if isinstance(raw.get("location"), Mapping):
@@ -262,8 +258,7 @@ class EnvironmentInput:
             "soil_moisture": "soil_moisture_pct", "空气温度": "air_temperature_c",
             "空气温度_c": "air_temperature_c", "空气湿度": "air_humidity_pct",
             "空气湿度_pct": "air_humidity_pct", "CO2浓度": "co2_ppm", "二氧化碳": "co2_ppm",
-            "土壤温度": "soil_temperature_c", "土壤湿度": "soil_moisture_pct", "土壤湿度20cm": "soil_moisture_20_pct",
-            "土壤湿度40cm": "soil_moisture_40_pct", "土壤湿度60cm": "soil_moisture_60_pct",
+            "土壤温度": "soil_temperature_c", "土壤湿度": "soil_moisture_pct",
             "土壤氮": "soil_n_mg_kg", "土壤氮浓度": "soil_n_mg_kg",
             "土壤磷": "soil_p_mg_kg", "土壤磷浓度": "soil_p_mg_kg",
             "土壤钾": "soil_k_mg_kg", "土壤钾浓度": "soil_k_mg_kg",
@@ -283,16 +278,9 @@ class EnvironmentInput:
                 if source in npk:
                     raw.setdefault(target, npk[source])
         if moisture is not None:
-            if isinstance(moisture, Mapping):
-                raw.setdefault("soil_moisture_20_pct", moisture.get("20", moisture.get(20, cls.soil_moisture_20_pct)))
-                raw.setdefault("soil_moisture_40_pct", moisture.get("40", moisture.get(40, cls.soil_moisture_40_pct)))
-                raw.setdefault("soil_moisture_60_pct", moisture.get("60", moisture.get(60, cls.soil_moisture_60_pct)))
-            elif isinstance(moisture, (list, tuple)):
-                for key, item in zip(("soil_moisture_20_pct", "soil_moisture_40_pct", "soil_moisture_60_pct"), moisture):
-                    raw.setdefault(key, item)
-            else:
-                for key in ("soil_moisture_20_pct", "soil_moisture_40_pct", "soil_moisture_60_pct"):
-                    raw.setdefault(key, moisture)
+            if isinstance(moisture, Mapping) or isinstance(moisture, (list, tuple)):
+                raise ValueError("仅支持单个土壤探针值 soil_moisture_pct")
+            raw["soil_moisture_pct"] = moisture
         forecast = raw.get("weather_forecast")
         if isinstance(forecast, Mapping):
             rain_values = forecast.get("precipitation_sum", forecast.get("rain_mm", []))
@@ -316,11 +304,6 @@ class EnvironmentInput:
         return cls(**values)
 
 
-def _nearest_profile(latitude: float, longitude: float) -> dict[str, Any]:
-    profiles = json.loads(SOIL_PATH.read_text(encoding="utf-8"))["profiles"]
-    return min(profiles, key=lambda item: (item["latitude"] - latitude) ** 2 + (item["longitude"] - longitude) ** 2)
-
-
 def _fallback_weather() -> dict[str, float]:
     try:
         frame = pd.read_csv(WEATHER_PATH, parse_dates=["date"]).replace(-999, np.nan).dropna()
@@ -341,7 +324,7 @@ def _fallback_weather() -> dict[str, float]:
 
 
 class EnvironmentProvider:
-    """Merge Open-Meteo weather, local soil prior, and sensor overrides.
+    """Merge live weather and installed-sensor overrides.
 
     Network failures intentionally fall back to the last locally retrieved
     weather row. A production adapter should mark stale data and let the PLC
@@ -356,7 +339,7 @@ class EnvironmentProvider:
             "latitude": latitude, "longitude": longitude, "timezone": "Asia/Shanghai",
             "forecast_days": 3,
             "wind_speed_unit": "ms",
-            "current": "temperature_2m,relative_humidity_2m,wind_speed_10m,shortwave_radiation,precipitation,soil_temperature_0cm,soil_moisture_0_to_1cm",
+            "current": "temperature_2m,relative_humidity_2m,wind_speed_10m,shortwave_radiation,precipitation,soil_temperature_0cm",
             "daily": "precipitation_sum,et0_fao_evapotranspiration,temperature_2m_max,temperature_2m_min,relative_humidity_2m_mean,wind_speed_10m_max,shortwave_radiation_sum",
         }
         url = "https://api.open-meteo.com/v1/forecast?" + urllib.parse.urlencode(params)
@@ -383,7 +366,6 @@ class EnvironmentProvider:
                      "humidity_pct": daily_humidity[index], "wind_speed_m_s": daily_wind[index],
                      "light_lux": None if daily_light[index] is None else float(daily_light[index]) * 1000.0}
                     for index, date in enumerate(dates)]
-        moisture = current.get("soil_moisture_0_to_1cm")
         return {
             "observation_time": current.get("time"),
             "air_temperature_c": current.get("temperature_2m"),
@@ -397,23 +379,15 @@ class EnvironmentProvider:
             "rain_next_2d_mm": sum(rain[1:3]) if len(rain) > 1 else (rain[0] if rain else 0.0),
             "eto_forecast_mm": eto[0] if eto else 5.0,
             "soil_temperature_c": current.get("soil_temperature_0cm"),
-            "soil_moisture_20_pct": None if moisture is None else float(moisture) * 100,
-            "soil_moisture_40_pct": None if moisture is None else float(moisture) * 100,
-            "soil_moisture_60_pct": None if moisture is None else float(moisture) * 100,
             "weather_forecast": forecast,
         }
 
     def fetch(self, latitude: float = DEFAULT_LATITUDE, longitude: float = DEFAULT_LONGITUDE,
               sensor_data: Mapping[str, Any] | None = None, offline: bool = False) -> EnvironmentInput:
-        profile = _nearest_profile(latitude, longitude)
         weather = _fallback_weather()
         data: dict[str, Any] = {
             "latitude": latitude, "longitude": longitude,
-            "soil_ph": profile.get("ph", 8.4),
-            "soil_n_mg_kg": profile.get("nitrogen_g_kg", 1.2) * 1000,
-            "soil_p_mg_kg": profile.get("phosphorus_mg_kg", 20.0),
-            "soil_k_mg_kg": profile.get("potassium_mg_kg", 160.0),
-            "source": {"soil": "ISRIC SoilGrids区域先验（本地缓存）"},
+            "source": {"soil": "等待已安装土壤探针真实数据"},
             **weather,
         }
         if not offline:
@@ -426,7 +400,7 @@ class EnvironmentProvider:
         else:
             data["source"] = {**data["source"], "weather": "本地NASA POWER缓存（offline）"}
         if sensor_data:
-            # Sensor values have precedence over a weather/profile estimate.
+            # Installed sensor values are the only soil inputs accepted here.
             overrides = dict(sensor_data)
             overrides.setdefault("source", {})
             if isinstance(overrides["source"], Mapping):
@@ -436,7 +410,9 @@ class EnvironmentProvider:
 
 
 def _soil_levels(environment: EnvironmentInput) -> tuple[str, str, str]:
-    def level(value: float, low: float, high: float) -> str:
+    def level(value: float | None, low: float, high: float) -> str:
+        if value is None:
+            return "unknown"
         if value < low:
             return "low"
         if value >= high:
@@ -467,31 +443,25 @@ def _observation_doy(value: str | None) -> int:
 
 def dynamic_irrigation_threshold(stage_cfg: Mapping[str, Any], environment: EnvironmentInput,
                                  forecast: Mapping[str, Any] | None = None) -> dict[str, float]:
-    """Adjust field-capacity thresholds from forecast heat and evaporative demand.
-
-    The base trigger remains crop/stage specific. Heat and ET0 can move it
-    upward (start earlier at a higher soil-water fraction); forecast rain moves
-    it downward. All coefficients are conservative regional defaults and are
-    clamped to prevent an unsafe one-step jump.
-    """
+    """Adjust direct single-probe moisture setpoints from live weather."""
     summary = dict(forecast or environment.forecast_summary())
-    base_trigger = float(stage_cfg["trigger_fc"])
-    base_target = float(stage_cfg["target_fc"])
+    base_trigger = float(stage_cfg["trigger_moisture_pct"])
+    base_target = float(stage_cfg["target_moisture_pct"])
     heat_delta = 0.02 * max(0.0, float(summary["temperature_max_c"]) - 28.0) / 5.0
     eto_delta = 0.02 * max(0.0, float(summary["eto_daily_mm"]) - 5.0) / 2.0
-    rain_delta = 0.03 * min(float(summary["rain_next_2d_mm"]), 10.0) / 10.0
+    rain_delta = 1.2 * min(float(summary["rain_next_2d_mm"]), 10.0) / 10.0
     adjustment = heat_delta + eto_delta - rain_delta
-    trigger = float(np.clip(base_trigger + adjustment, max(0.55, base_trigger - 0.05), min(0.85, base_trigger + 0.08)))
-    target = float(np.clip(base_target + max(0.0, adjustment) * 0.5, trigger + 0.03, 0.92))
+    trigger = float(np.clip(base_trigger + adjustment, max(0.0, base_trigger - 3.0), min(100.0, base_trigger + 4.0)))
+    target = float(np.clip(base_target + max(0.0, adjustment) * 0.5, trigger + 0.5, 100.0))
     return {
-        "base_trigger_fc": round(base_trigger, 4),
-        "dynamic_trigger_fc": round(trigger, 4),
-        "base_target_fc": round(base_target, 4),
-        "dynamic_target_fc": round(target, 4),
-        "adjustment_fc": round(trigger - base_trigger, 4),
-        "heat_adjustment_fc": round(heat_delta, 4),
-        "eto_adjustment_fc": round(eto_delta, 4),
-        "rain_adjustment_fc": round(-rain_delta, 4),
+        "base_trigger_moisture_pct": round(base_trigger, 2),
+        "dynamic_trigger_moisture_pct": round(trigger, 2),
+        "base_target_moisture_pct": round(base_target, 2),
+        "dynamic_target_moisture_pct": round(target, 2),
+        "adjustment_moisture_pct": round(trigger - base_trigger, 2),
+        "heat_adjustment_moisture_pct": round(heat_delta, 2),
+        "eto_adjustment_moisture_pct": round(eto_delta, 2),
+        "rain_adjustment_moisture_pct": round(-rain_delta, 2),
     }
 
 
@@ -533,11 +503,10 @@ class FertigationModel:
             raise ValueError("必须提供N、P、K三种母液浓度（g/L）")
         return FertilizerConcentrations(n, p, k)
 
-    def _feature_row(self, environment: EnvironmentInput, stage: str, fc: float,
-                     soil_levels: tuple[str, str, str], root_moisture: float,
+    def _feature_row(self, environment: EnvironmentInput, stage: str,
+                     soil_levels: tuple[str, str, str],
                      n_remaining: float, p_remaining: float, k_remaining: float,
                      forecast: Mapping[str, Any], threshold: Mapping[str, Any]) -> dict[str, Any]:
-        profile = _nearest_profile(environment.latitude, environment.longitude)
         stage_cfg = CONFIG["crops"][self.crop]["stages"][stage]
         date = datetime.now() if not environment.observation_time else datetime.fromisoformat(environment.observation_time.replace("Z", "+00:00"))
         # A lux-to-radiation conversion is only a feature mapping; use a PAR
@@ -546,10 +515,10 @@ class FertigationModel:
         # Use the forecast summary for decision features. Current sensor values
         # remain available in ``automatic_inputs`` for audit and safety checks.
         t = float(forecast["temperature_mean_c"])
-        levels = {"low": 1.0, "medium": 0.65, "high": 0.0}
+        levels = {"low": 1.0, "medium": 0.65, "high": 0.0, "unknown": 0.0}
         return {
             "crop": self.crop, "stage": stage, "soil_n_level": soil_levels[0], "soil_p_level": soil_levels[1],
-            "soil_k_level": soil_levels[2], "soil_profile": profile["name"], "doy": date.timetuple().tm_yday,
+            "soil_k_level": soil_levels[2], "doy": date.timetuple().tm_yday,
             "t_mean": t, "t_max": float(forecast["temperature_max_c"]), "t_min": float(forecast["temperature_min_c"]),
             "rh": float(forecast["humidity_mean_pct"]),
             "wind": float(forecast["wind_max_m_s"]), "radiation": float(forecast["light_mean_lux"]) / 120.0,
@@ -558,25 +527,25 @@ class FertigationModel:
             "gdd10_14d": max(0.0, t - 10) * 14, "rain_7d": environment.rain_24h_mm,
             "eto_7d": float(forecast["eto_next_2d_mm"]) * 3.5,
             "dry_days": 0 if float(forecast["rain_next_2d_mm"]) >= 1 else 7,
-            "field_capacity": fc, "moisture20": environment.soil_moisture_20_pct,
-            "moisture40": environment.soil_moisture_40_pct, "moisture60": environment.soil_moisture_60_pct,
-            "soil_ec": environment.soil_ec_ds_m, "soil_ph": environment.soil_ph,
-            "soc_g_kg": profile.get("soc_g_kg", 8.0), "soil_n_g_kg": environment.soil_n_mg_kg / 1000,
-            "sand_pct": profile.get("sand_pct", 40.0), "clay_pct": profile.get("clay_pct", 20.0),
-            "bulk_density": profile.get("bulk_density", 1.4), "days_since_fertigation": environment.days_since_fertigation,
+            "soil_moisture_pct": environment.soil_moisture_pct if environment.soil_moisture_pct is not None else 0.0,
+            "moisture_trigger_pct": threshold["dynamic_trigger_moisture_pct"],
+            "moisture_target_pct": threshold["dynamic_target_moisture_pct"],
+            "soil_ec": environment.soil_ec_ds_m if environment.soil_ec_ds_m is not None else 0.0,
+            "soil_ph": environment.soil_ph if environment.soil_ph is not None else 0.0,
+            "days_since_fertigation": environment.days_since_fertigation,
             "n_applied_stage": 0.0, "p_applied_stage": 0.0, "k_applied_stage": 0.0,
-            "root_depth": stage_cfg["root_depth_m"], "root_moisture": root_moisture,
-            "relative_fc": root_moisture / fc, "trigger_fc": float(threshold["dynamic_trigger_fc"]),
-            "target_fc": float(threshold["dynamic_target_fc"]), "kc": stage_cfg["kc"], "n_remaining": n_remaining,
+            "kc": stage_cfg["kc"], "n_remaining": n_remaining,
             "p_remaining": p_remaining, "k_remaining": k_remaining, "n_level_factor": levels[soil_levels[0]],
             "p_level_factor": levels[soil_levels[1]], "k_level_factor": levels[soil_levels[2]],
             "fertilizer_interval_ready": int(environment.days_since_fertigation >= 7),
-            "ec_block": int(environment.soil_ec_ds_m >= 2.0),
+            "ec_block": int(environment.soil_ec_ds_m is not None and environment.soil_ec_ds_m >= 2.0),
             # Kept in the row for a future sensor-aware retraining package.
             "latitude": environment.latitude, "longitude": environment.longitude,
-            "co2_ppm": environment.co2_ppm, "soil_temperature_c": environment.soil_temperature_c,
-            "soil_n_mg_kg": environment.soil_n_mg_kg, "soil_p_mg_kg": environment.soil_p_mg_kg,
-            "soil_k_mg_kg": environment.soil_k_mg_kg, "light_lux": environment.light_lux,
+            "co2_ppm": environment.co2_ppm, "soil_temperature_c": environment.soil_temperature_c if environment.soil_temperature_c is not None else 0.0,
+            "soil_n_mg_kg": environment.soil_n_mg_kg if environment.soil_n_mg_kg is not None else 0.0,
+            "soil_p_mg_kg": environment.soil_p_mg_kg if environment.soil_p_mg_kg is not None else 0.0,
+            "soil_k_mg_kg": environment.soil_k_mg_kg if environment.soil_k_mg_kg is not None else 0.0,
+            "light_lux": environment.light_lux,
             "rain_24h_mm": environment.rain_24h_mm,
             "forecast_temperature_mean_c": float(forecast["temperature_mean_c"]),
             "forecast_temperature_max_c": float(forecast["temperature_max_c"]),
@@ -603,8 +572,6 @@ class FertigationModel:
         doy = _observation_doy(environment.observation_time)
         stage = stage_for(self.crop, doy)
         soil_levels = _soil_levels(environment)
-        profile = _nearest_profile(environment.latitude, environment.longitude)
-        fc = estimate_fc(profile)
         if stage is None:
             decision = {
                 "crop": self.crop, "stage": "休耕/非生育期", "irrigation_m3_mu": 0.0,
@@ -621,6 +588,17 @@ class FertigationModel:
         quality = _input_quality(environment)
         soil_blockers = [str(item) for item in quality.get("soil_critical_missing", []) if item]
         fertilizer_blockers = [str(item) for item in quality.get("fertilizer_blocked", []) if item]
+        if environment.soil_moisture_pct is None:
+            soil_blockers.append("soil_moisture_pct")
+        if environment.soil_ph is None:
+            soil_blockers.append("soil_ph")
+        for name, value in (("soil_n_mg_kg", environment.soil_n_mg_kg),
+                            ("soil_p_mg_kg", environment.soil_p_mg_kg),
+                            ("soil_k_mg_kg", environment.soil_k_mg_kg)):
+            if value is None:
+                fertilizer_blockers.append(name)
+        soil_blockers = sorted(set(soil_blockers))
+        fertilizer_blockers = sorted(set(fertilizer_blockers))
         if soil_blockers:
             reason = "关键土壤输入缺失或异常，拒绝自动灌溉：" + ", ".join(soil_blockers)
             decision = {
@@ -635,17 +613,16 @@ class FertigationModel:
         stage_cfg = CONFIG["crops"][self.crop]["stages"][stage]
         forecast = environment.forecast_summary(horizon_days=2)
         threshold = dynamic_irrigation_threshold(stage_cfg, environment, forecast)
-        moisture = [environment.soil_moisture_20_pct, environment.soil_moisture_40_pct, environment.soil_moisture_60_pct]
-        root_moisture = weighted_root_moisture(moisture, stage_cfg["root_depth_m"])
         crop_cfg = CONFIG["crops"][self.crop]
         n_remaining = crop_cfg["season_n_kg_mu"] * stage_cfg["n_share"]
         p_remaining = crop_cfg["season_p2o5_kg_mu"] * stage_cfg["p_share"]
         k_remaining = crop_cfg["season_k2o_kg_mu"] * stage_cfg["k_share"]
-        row = self._feature_row(environment, stage, fc, soil_levels, root_moisture, n_remaining, p_remaining, k_remaining, forecast, threshold)
-        teacher = recommend(self.crop, stage, moisture, fc, float(forecast["rain_next_2d_mm"]), float(forecast["eto_daily_mm"]),
+        row = self._feature_row(environment, stage, soil_levels, n_remaining, p_remaining, k_remaining, forecast, threshold)
+        teacher = recommend(self.crop, stage, environment.soil_moisture_pct,
+                            float(forecast["rain_next_2d_mm"]), float(forecast["eto_daily_mm"]),
                             environment.days_since_fertigation, environment.soil_ec_ds_m, 0, 0, 0,
-                            *soil_levels, trigger_fc_override=threshold["dynamic_trigger_fc"],
-                            target_fc_override=threshold["dynamic_target_fc"])
+                            *soil_levels, trigger_moisture_override=threshold["dynamic_trigger_moisture_pct"],
+                            target_moisture_override=threshold["dynamic_target_moisture_pct"])
         package = self._load_package()
         prediction = None
         if package is not None:
@@ -667,9 +644,9 @@ class FertigationModel:
         if wind_block:
             safety_alerts.append("风速超过10 m/s，暂停灌溉以避免飘移")
         ph_block = not 5.0 <= environment.soil_ph <= 8.8
-        cold_block = environment.soil_temperature_c < 5.0
+        cold_block = environment.soil_temperature_c is not None and environment.soil_temperature_c < 5.0
         fertilizer_gate = (
-            water > 0 and environment.soil_ec_ds_m < 2.0
+            water > 0 and (environment.soil_ec_ds_m is None or environment.soil_ec_ds_m < 2.0)
             and environment.days_since_fertigation >= 7 and not ph_block and not cold_block
             and not fertilizer_blockers
         )
@@ -696,8 +673,8 @@ class FertigationModel:
         elif not irrigation_demand:
             execution_status = "not_needed"
             execution_reason = (
-                f"根区水分为田间持水量的{root_moisture / fc * 100:.1f}%，"
-                f"高于本阶段{threshold['dynamic_trigger_fc'] * 100:.1f}%的灌溉触发线"
+                f"单个土壤探针水分为{environment.soil_moisture_pct:.1f}%，"
+                f"高于本阶段{threshold['dynamic_trigger_moisture_pct']:.1f}%的灌溉触发线"
             )
         else:
             execution_status = "below_minimum"
@@ -705,13 +682,12 @@ class FertigationModel:
         decision = {
             "crop": self.crop, "stage": stage, "irrigate": water > 0, "irrigation_m3_mu": round(water, 1),
             "fertigate": any(nutrients), "nitrogen_kg_mu": nutrients[0], "p2o5_kg_mu": nutrients[1],
-            "k2o_kg_mu": nutrients[2], "root_zone_moisture_pct": round(root_moisture, 2),
+            "k2o_kg_mu": nutrients[2], "soil_moisture_pct": round(environment.soil_moisture_pct, 2),
             "execution_status": execution_status, "execution_reason": execution_reason,
-            "relative_field_capacity": round(root_moisture / fc, 3),
-            "base_trigger_relative_fc": threshold["base_trigger_fc"],
-            "dynamic_trigger_relative_fc": threshold["dynamic_trigger_fc"],
-            "dynamic_target_relative_fc": threshold["dynamic_target_fc"],
-            "threshold_adjustment_fc": threshold["adjustment_fc"],
+            "base_trigger_moisture_pct": threshold["base_trigger_moisture_pct"],
+            "dynamic_trigger_moisture_pct": threshold["dynamic_trigger_moisture_pct"],
+            "dynamic_target_moisture_pct": threshold["dynamic_target_moisture_pct"],
+            "threshold_adjustment_moisture_pct": threshold["adjustment_moisture_pct"],
             "soil_n_level": soil_levels[0],
             "soil_p_level": soil_levels[1], "soil_k_level": soil_levels[2], "model": "hohhot-fertigation-policy-v2",
             "model_prediction": [round(float(x), 4) for x in prediction],

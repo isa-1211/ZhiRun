@@ -5,29 +5,16 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Iterable
 
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = json.loads((ROOT / "configs" / "crops.json").read_text(encoding="utf-8"))
 
 
-def weighted_root_moisture(values: Iterable[float], root_depth_m: float) -> float:
-    vals = list(values)
-    if not vals:
-        raise ValueError("至少需要一个土壤水分值")
-    if len(vals) == 1:
-        return vals[0]
-    weights = [0.55, 0.30, 0.15][: len(vals)] if root_depth_m >= 0.6 else [0.7, 0.3][: len(vals)]
-    weights = weights[: len(vals)]
-    return sum(v * w for v, w in zip(vals, weights)) / sum(weights)
-
-
 def recommend(
     crop: str,
     stage: str,
-    moisture: list[float],
-    field_capacity: float,
+    soil_moisture_pct: float,
     rain_forecast_mm: float,
     eto_mm: float,
     days_since_fertigation: int,
@@ -38,24 +25,31 @@ def recommend(
     soil_test_n_level: str = "medium",
     soil_test_p_level: str = "medium",
     soil_test_k_level: str = "medium",
-    trigger_fc_override: float | None = None,
-    target_fc_override: float | None = None,
+    trigger_moisture_override: float | None = None,
+    target_moisture_override: float | None = None,
 ) -> dict:
     crop_cfg = CONFIG["crops"][crop]
     stage_cfg = crop_cfg["stages"][stage]
-    root_moisture = weighted_root_moisture(moisture, stage_cfg["root_depth_m"])
-    rel_fc = root_moisture / field_capacity
-    trigger = stage_cfg["trigger_fc"] if trigger_fc_override is None else float(trigger_fc_override)
-    target_fc = stage_cfg["target_fc"] if target_fc_override is None else float(target_fc_override)
-    if not 0.4 <= trigger <= 0.9:
-        raise ValueError("trigger_fc_override必须在0.4到0.9之间")
-    if not 0.5 <= target_fc <= 0.95 or target_fc < trigger:
-        raise ValueError("target_fc_override必须不小于trigger_fc_override且在0.5到0.95之间")
-    target_vwc = target_fc * field_capacity
-    root_deficit_mm = max(0.0, (target_vwc - root_moisture) / 100 * stage_cfg["root_depth_m"] * 1000)
+    soil_moisture_pct = float(soil_moisture_pct)
+    if not 0 <= soil_moisture_pct <= 100:
+        raise ValueError("soil_moisture_pct必须在0到100之间")
+    trigger = stage_cfg["trigger_moisture_pct"] if trigger_moisture_override is None else float(trigger_moisture_override)
+    target = stage_cfg["target_moisture_pct"] if target_moisture_override is None else float(target_moisture_override)
+    if not 0 <= trigger <= 100:
+        raise ValueError("trigger_moisture_pct必须在0到100之间")
+    if not 0 <= target <= 100 or target < trigger:
+        raise ValueError("target_moisture_pct必须不小于trigger_moisture_pct且在0到100之间")
+    # The single installed probe is the sole soil-water input. The crop stage
+    # depth is only used to convert a measured percentage deficit to volume.
+    effective_depth_m = {
+        "苗期": 0.30, "拔节大喇叭口": 0.60, "抽雄吐丝": 0.80, "灌浆": 0.90,
+        "成熟": 0.90, "块茎形成": 0.35, "块茎膨大": 0.45, "叶丛快速生长": 0.50,
+        "块根膨大": 0.60, "糖分积累": 0.60, "现蕾": 0.65, "开花": 0.90,
+    }.get(stage, 0.50)
+    moisture_deficit_mm = max(0.0, (target - soil_moisture_pct) / 100 * effective_depth_m * 1000)
     et_need_mm = max(0.0, stage_cfg["kc"] * eto_mm - rain_forecast_mm * CONFIG["defaults"]["effective_rain_fraction"])
-    should_irrigate = rel_fc <= trigger and rain_forecast_mm < max(5.0, et_need_mm)
-    gross_mm = max(root_deficit_mm, et_need_mm) / CONFIG["defaults"]["application_efficiency"] if should_irrigate else 0.0
+    should_irrigate = soil_moisture_pct <= trigger and rain_forecast_mm < max(5.0, et_need_mm)
+    gross_mm = max(moisture_deficit_mm, et_need_mm) / CONFIG["defaults"]["application_efficiency"] if should_irrigate else 0.0
     irrigation = min(gross_mm * 0.667, CONFIG["defaults"]["max_single_irrigation_m3_mu"])
 
     stage_n_budget = crop_cfg["season_n_kg_mu"] * stage_cfg["n_share"]
@@ -83,10 +77,9 @@ def recommend(
     return {
         "crop": crop,
         "stage": stage,
-        "root_zone_moisture_pct": round(root_moisture, 2),
-        "relative_field_capacity": round(rel_fc, 3),
-        "trigger_relative_fc": round(trigger, 3),
-        "target_relative_fc": round(target_fc, 3),
+        "soil_moisture_pct": round(soil_moisture_pct, 2),
+        "moisture_trigger_pct": round(trigger, 2),
+        "moisture_target_pct": round(target, 2),
         "irrigate": should_irrigate,
         "irrigation_m3_mu": round(irrigation, 1),
         "fertigate": fertigation_due,
@@ -106,10 +99,7 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="呼和浩特水肥一体化基线建议")
     p.add_argument("--crop", choices=CONFIG["crops"].keys())
     p.add_argument("--stage")
-    p.add_argument("--soil-moisture-20", type=float)
-    p.add_argument("--soil-moisture-40", type=float)
-    p.add_argument("--soil-moisture-60", type=float)
-    p.add_argument("--field-capacity", type=float, default=28.0)
+    p.add_argument("--soil-moisture", type=float)
     p.add_argument("--rain-forecast", type=float, default=0.0)
     p.add_argument("--eto", type=float, default=5.0)
     p.add_argument("--days-since-fertigation", type=int, default=8)
@@ -131,15 +121,14 @@ def main() -> None:
         examples = [("马铃薯", "块茎膨大", [18, 21]), ("甜菜", "叶丛快速生长", [19, 22]),
                     ("玉米", "抽雄吐丝", [19, 21, 23]), ("向日葵", "开花", [19, 21, 23])]
         for crop, stage, moisture in examples:
-            print(json.dumps(recommend(crop, stage, moisture, 28, 0, 5.5, 8), ensure_ascii=False))
+            print(json.dumps(recommend(crop, stage, moisture[0], 0, 5.5, 8), ensure_ascii=False))
         return
-    if not (args.crop and args.stage and args.soil_moisture_20 is not None):
-        raise SystemExit("非 demo 模式必须提供 --crop、--stage 和 --soil-moisture-20")
+    if not (args.crop and args.stage and args.soil_moisture is not None):
+        raise SystemExit("非 demo 模式必须提供 --crop、--stage 和 --soil-moisture")
     if args.stage not in CONFIG["crops"][args.crop]["stages"]:
         valid = "、".join(CONFIG["crops"][args.crop]["stages"])
         raise SystemExit(f"{args.crop} 的 stage 应为：{valid}")
-    moisture = [v for v in (args.soil_moisture_20, args.soil_moisture_40, args.soil_moisture_60) if v is not None]
-    result = recommend(args.crop, args.stage, moisture, args.field_capacity, args.rain_forecast,
+    result = recommend(args.crop, args.stage, args.soil_moisture, args.rain_forecast,
                        args.eto, args.days_since_fertigation, args.soil_ec, args.nitrogen_applied_in_stage,
                        args.p2o5_applied_in_stage, args.k2o_applied_in_stage,
                        args.soil_test_n_level, args.soil_test_p_level, args.soil_test_k_level)

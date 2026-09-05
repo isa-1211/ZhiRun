@@ -40,7 +40,7 @@ _defaults = None
 # Input quality is tracked separately from the fallback values.  This keeps
 # missing sensor data from silently looking like a valid regional prior.
 _SOIL_RULES = {
-    "soil_moisture_20_pct": (("soil_moisture_20_pct", "moisture20", "soilMoist"), 0.0, 100.0),
+    "soil_moisture_pct": (("soil_moisture_pct", "soilMoist", "soil_moisture"), 0.0, 100.0),
     "soil_ph": (("soil_ph", "soilPH"), 0.0, 14.0),
     "soil_temperature_c": (("soil_temperature_c", "soilTemp"), -40.0, 70.0),
     "soil_n_mg_kg": (("soil_n_mg_kg", "soilN"), 0.0, 10000.0),
@@ -105,8 +105,8 @@ def _input_quality(body, sensor):
         for name in stale_soil:
             valid.pop(name, None)
 
-    # A single soil-moisture reading is the installed controller interface;
-    # the model adapter intentionally projects it to the three root depths.
+    # The installed controller has one soil probe. No depth projection or
+    # synthetic soil profile is allowed in the automation path.
     soil_critical = set(_SOIL_RULES)
     soil_critical_missing = sorted(soil_critical.intersection(set(missing) | set(invalid)))
     nutrient_missing = sorted({
@@ -202,7 +202,7 @@ def first_value(body, *keys, default=None):
 def invalid_zero_soil_frame(body):
     """Detect a powered sensor whose measurement electrodes have no valid sample."""
     values = (
-        first_value(body, "soil_moisture_20_pct", "moisture20", "soilMoist"),
+        first_value(body, "soil_moisture_pct", "soilMoist", "soil_moisture"),
         first_value(body, "soil_n_mg_kg", "n"),
         first_value(body, "soil_p_mg_kg", "p"),
         first_value(body, "soil_k_mg_kg", "k"),
@@ -267,15 +267,9 @@ def environment_from_request(body, crop):
             if rules and target in quality["invalid"]:
                 continue
             sensor[target] = value
-    moisture20 = first_value(body, "soil_moisture_20_pct", "moisture20", "soilMoist")
-    if moisture20 is not None and not zero_soil_frame:
-        sensor["soil_moisture_20_pct"] = moisture20
-        sensor["soil_moisture_40_pct"] = first_value(
-            body, "soil_moisture_40_pct", "moisture40", default=moisture20
-        )
-        sensor["soil_moisture_60_pct"] = first_value(
-            body, "soil_moisture_60_pct", "moisture60", default=moisture20
-        )
+    moisture = first_value(body, "soil_moisture_pct", "soilMoist", "soil_moisture")
+    if moisture is not None and not zero_soil_frame:
+        sensor["soil_moisture_pct"] = moisture
     sensor["latitude"] = latitude
     sensor["longitude"] = longitude
     sensor["observation_time"] = observation_time(body, crop)
@@ -283,12 +277,12 @@ def environment_from_request(body, crop):
     sensor["source"] = {
         **(sensor.get("source") if isinstance(sensor.get("source"), dict) else {}),
         "sensors": "ZhiRun realtime request",
-        **({"soil_sensor": "invalid_zero_frame; regional prior applied"} if zero_soil_frame else {}),
+        **({"soil_sensor": "invalid_zero_frame; automation blocked"} if zero_soil_frame else {}),
         "input_quality": quality,
     }
     if zero_soil_frame:
         quality["soil_critical_missing"] = sorted(set(quality["soil_critical_missing"]) | {
-            "soil_moisture_20_pct", "soil_ph",
+            "soil_moisture_pct", "soil_ph",
         })
         quality["fertilizer_blocked"] = sorted(set(quality["fertilizer_blocked"]) | {
             "soil_n_mg_kg", "soil_p_mg_kg", "soil_k_mg_kg",
@@ -359,8 +353,8 @@ def assess_farm_condition(body):
     """
     request = dict(body or {})
     # Concentrations only satisfy the model's work-order input contract. They
-    # do not affect the condition components below, which come from sensors,
-    # crop stage, soil profile, and the forecast.
+    # do not affect the condition components below, which come from installed
+    # sensors, crop stage, and the live forecast.
     request.setdefault("n_concentration_g_l", 100.0)
     request.setdefault("p_concentration_g_l", 80.0)
     request.setdefault("k_concentration_g_l", 120.0)
@@ -373,26 +367,17 @@ def assess_farm_condition(body):
     invalid = list(quality.get("invalid") or [])
 
     components = []
-    relative_fc = decision.get("relative_field_capacity")
-    trigger_fc = decision.get("dynamic_trigger_relative_fc")
-    target_fc = decision.get("dynamic_target_relative_fc")
-    moisture = automatic.get("soil_moisture_20_pct")
-    # FAO-56 teacher variables: FC is the upper root-zone storage limit,
-    # PWP is the lower plant-available limit, and RAW is the depletion point.
-    # The installed probe reports a calibrated 0-100 percentage rather than
-    # volumetric water content, so use the controller's field calibration here
-    # and keep the model's dynamic trigger/target as the RAW/target fractions.
-    sensor_pwp_pct, sensor_fc_pct = 15.0, 55.0
-    if moisture is not None and trigger_fc is not None and target_fc is not None:
-        ideal_low = sensor_pwp_pct + float(trigger_fc) * (sensor_fc_pct - sensor_pwp_pct)
-        ideal_high = sensor_pwp_pct + float(target_fc) * (sensor_fc_pct - sensor_pwp_pct)
-        water_score = _band_score(moisture, ideal_low, ideal_high, sensor_pwp_pct, 75.0)
-        water_reason = "根区传感器 {:.1f}%；FAO-56可用水分目标 {:.0f}-{:.0f}%（FC {}%，PWP {}%）".format(
-            float(moisture), ideal_low, ideal_high, sensor_fc_pct, sensor_pwp_pct
+    moisture = automatic.get("soil_moisture_pct")
+    trigger_moisture = decision.get("dynamic_trigger_moisture_pct")
+    target_moisture = decision.get("dynamic_target_moisture_pct")
+    if moisture is not None and trigger_moisture is not None and target_moisture is not None:
+        water_score = _band_score(moisture, float(trigger_moisture), float(target_moisture), 0.0, 100.0)
+        water_reason = "单个土壤探针 {:.1f}%；本阶段直接水分目标 {:.1f}-{:.1f}%".format(
+            float(moisture), float(trigger_moisture), float(target_moisture)
         )
     else:
-        water_score, water_reason = None, "关键根区水分数据不可用"
-    components.append({"key": "root_water", "name": "根区水分", "weight": 45,
+        water_score, water_reason = None, "单个土壤探针水分数据不可用"
+    components.append({"key": "soil_moisture", "name": "土壤水分", "weight": 45,
                        "score": None if water_score is None else round(water_score), "reason": water_reason})
 
     ph = automatic.get("soil_ph")
@@ -456,28 +441,13 @@ def assess_farm_condition(body):
         "critical_inputs": critical,
         "missing_inputs": missing,
         "invalid_inputs": invalid,
-        "water_calibration": {
-            "sensor_field_capacity_pct": sensor_fc_pct,
-            "sensor_permanent_wilting_point_pct": sensor_pwp_pct,
-            "method": "FAO-56 FC/PWP/TAW/RAW teacher mapping; sensor-specific calibration should replace defaults",
-        },
-        "teacher_model": {
-            "name": "FAO-56 soil-water balance teacher",
-            "principles": ["field capacity (FC)", "permanent wilting point (PWP)",
-                           "total available water (TAW)", "readily available water (RAW)"],
-            "references": [
-                "https://www.fao.org/4/x0490e/x0490e00.htm",
-                "https://extension.colostate.edu/resource/irrigation-scheduling-the-water-balance-approach/",
-                "https://edis.ifas.ufl.edu/publication/AE437",
-            ],
-        },
         "model": {
             "stage": decision.get("stage"),
             "execution_status": decision.get("execution_status"),
             "execution_reason": decision.get("execution_reason"),
-            "relative_field_capacity": relative_fc,
-            "dynamic_trigger_relative_fc": trigger_fc,
-            "dynamic_target_relative_fc": target_fc,
+            "soil_moisture_pct": moisture,
+            "dynamic_trigger_moisture_pct": trigger_moisture,
+            "dynamic_target_moisture_pct": target_moisture,
             "alerts": decision.get("alerts") or [],
         },
     }

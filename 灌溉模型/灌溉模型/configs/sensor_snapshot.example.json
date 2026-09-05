@@ -3,7 +3,7 @@
   "air_temperature_c": 25.0,
   "air_humidity_pct": 45.0,
   "co2_ppm": 420.0,
-  "soil_moisture_pct": {"20": 10.0, "40": 12.0, "60": 14.0},
+  "soil_moisture_pct": 35.0,
   "soil_temperature_c": 22.0,
   "soil_n_mg_kg": 800.0,
   "soil_p_mg_kg": 10.0,

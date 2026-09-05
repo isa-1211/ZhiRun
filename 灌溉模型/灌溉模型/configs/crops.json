@@ -7,10 +7,10 @@
       "season_p2o5_kg_mu": 8.0,
       "season_k2o_kg_mu": 18.0,
       "stages": {
-        "苗期": {"root_depth_m": 0.25, "trigger_fc": 0.70, "target_fc": 0.82, "kc": 0.50, "n_share": 0.20, "p_share": 0.45, "k_share": 0.15},
-        "块茎形成": {"root_depth_m": 0.35, "trigger_fc": 0.72, "target_fc": 0.85, "kc": 0.85, "n_share": 0.30, "p_share": 0.35, "k_share": 0.30},
-        "块茎膨大": {"root_depth_m": 0.45, "trigger_fc": 0.72, "target_fc": 0.85, "kc": 1.15, "n_share": 0.40, "p_share": 0.20, "k_share": 0.50},
-        "成熟": {"root_depth_m": 0.45, "trigger_fc": 0.60, "target_fc": 0.72, "kc": 0.75, "n_share": 0.10, "p_share": 0.00, "k_share": 0.05}
+        "苗期": {"trigger_moisture_pct": 43.0, "target_moisture_pct": 47.8, "kc": 0.50, "n_share": 0.20, "p_share": 0.45, "k_share": 0.15},
+        "块茎形成": {"trigger_moisture_pct": 43.8, "target_moisture_pct": 49.0, "kc": 0.85, "n_share": 0.30, "p_share": 0.35, "k_share": 0.30},
+        "块茎膨大": {"trigger_moisture_pct": 43.8, "target_moisture_pct": 49.0, "kc": 1.15, "n_share": 0.40, "p_share": 0.20, "k_share": 0.50},
+        "成熟": {"trigger_moisture_pct": 39.0, "target_moisture_pct": 43.8, "kc": 0.75, "n_share": 0.10, "p_share": 0.00, "k_share": 0.05}
       }
     },
     "甜菜": {
@@ -18,10 +18,10 @@
       "season_p2o5_kg_mu": 7.0,
       "season_k2o_kg_mu": 10.0,
       "stages": {
-        "苗期": {"root_depth_m": 0.30, "trigger_fc": 0.65, "target_fc": 0.80, "kc": 0.45, "n_share": 0.60, "p_share": 0.70, "k_share": 0.35},
-        "叶丛快速生长": {"root_depth_m": 0.50, "trigger_fc": 0.68, "target_fc": 0.83, "kc": 0.90, "n_share": 0.40, "p_share": 0.30, "k_share": 0.35},
-        "块根膨大": {"root_depth_m": 0.60, "trigger_fc": 0.70, "target_fc": 0.83, "kc": 1.10, "n_share": 0.00, "p_share": 0.00, "k_share": 0.30},
-        "糖分积累": {"root_depth_m": 0.60, "trigger_fc": 0.60, "target_fc": 0.72, "kc": 0.75, "n_share": 0.00, "p_share": 0.00, "k_share": 0.00}
+        "苗期": {"trigger_moisture_pct": 41.0, "target_moisture_pct": 47.0, "kc": 0.45, "n_share": 0.60, "p_share": 0.70, "k_share": 0.35},
+        "叶丛快速生长": {"trigger_moisture_pct": 42.2, "target_moisture_pct": 48.2, "kc": 0.90, "n_share": 0.40, "p_share": 0.30, "k_share": 0.35},
+        "块根膨大": {"trigger_moisture_pct": 43.0, "target_moisture_pct": 48.2, "kc": 1.10, "n_share": 0.00, "p_share": 0.00, "k_share": 0.30},
+        "糖分积累": {"trigger_moisture_pct": 39.0, "target_moisture_pct": 43.8, "kc": 0.75, "n_share": 0.00, "p_share": 0.00, "k_share": 0.00}
       }
     },
     "玉米": {
@@ -29,11 +29,11 @@
       "season_p2o5_kg_mu": 7.0,
       "season_k2o_kg_mu": 6.0,
       "stages": {
-        "苗期": {"root_depth_m": 0.30, "trigger_fc": 0.62, "target_fc": 0.78, "kc": 0.40, "n_share": 0.22, "p_share": 0.70, "k_share": 0.50},
-        "拔节大喇叭口": {"root_depth_m": 0.60, "trigger_fc": 0.70, "target_fc": 0.85, "kc": 0.85, "n_share": 0.45, "p_share": 0.20, "k_share": 0.30},
-        "抽雄吐丝": {"root_depth_m": 0.80, "trigger_fc": 0.72, "target_fc": 0.85, "kc": 1.20, "n_share": 0.25, "p_share": 0.10, "k_share": 0.20},
-        "灌浆": {"root_depth_m": 0.90, "trigger_fc": 0.66, "target_fc": 0.80, "kc": 0.85, "n_share": 0.08, "p_share": 0.00, "k_share": 0.00},
-        "成熟": {"root_depth_m": 0.90, "trigger_fc": 0.55, "target_fc": 0.65, "kc": 0.50, "n_share": 0.00, "p_share": 0.00, "k_share": 0.00}
+        "苗期": {"trigger_moisture_pct": 39.8, "target_moisture_pct": 46.2, "kc": 0.40, "n_share": 0.22, "p_share": 0.70, "k_share": 0.50},
+        "拔节大喇叭口": {"trigger_moisture_pct": 43.0, "target_moisture_pct": 49.0, "kc": 0.85, "n_share": 0.45, "p_share": 0.20, "k_share": 0.30},
+        "抽雄吐丝": {"trigger_moisture_pct": 43.8, "target_moisture_pct": 49.0, "kc": 1.20, "n_share": 0.25, "p_share": 0.10, "k_share": 0.20},
+        "灌浆": {"trigger_moisture_pct": 41.4, "target_moisture_pct": 47.0, "kc": 0.85, "n_share": 0.08, "p_share": 0.00, "k_share": 0.00},
+        "成熟": {"trigger_moisture_pct": 37.0, "target_moisture_pct": 41.0, "kc": 0.50, "n_share": 0.00, "p_share": 0.00, "k_share": 0.00}
       }
     },
     "向日葵": {
@@ -41,11 +41,11 @@
       "season_p2o5_kg_mu": 5.5,
       "season_k2o_kg_mu": 6.5,
       "stages": {
-        "苗期": {"root_depth_m": 0.35, "trigger_fc": 0.60, "target_fc": 0.76, "kc": 0.40, "n_share": 0.55, "p_share": 0.70, "k_share": 0.45},
-        "现蕾": {"root_depth_m": 0.65, "trigger_fc": 0.68, "target_fc": 0.82, "kc": 0.80, "n_share": 0.35, "p_share": 0.30, "k_share": 0.35},
-        "开花": {"root_depth_m": 0.90, "trigger_fc": 0.70, "target_fc": 0.83, "kc": 1.10, "n_share": 0.10, "p_share": 0.00, "k_share": 0.20},
-        "灌浆": {"root_depth_m": 1.00, "trigger_fc": 0.64, "target_fc": 0.77, "kc": 0.80, "n_share": 0.00, "p_share": 0.00, "k_share": 0.00},
-        "成熟": {"root_depth_m": 1.00, "trigger_fc": 0.52, "target_fc": 0.62, "kc": 0.45, "n_share": 0.00, "p_share": 0.00, "k_share": 0.00}
+        "苗期": {"trigger_moisture_pct": 39.0, "target_moisture_pct": 45.4, "kc": 0.40, "n_share": 0.55, "p_share": 0.70, "k_share": 0.45},
+        "现蕾": {"trigger_moisture_pct": 42.2, "target_moisture_pct": 47.8, "kc": 0.80, "n_share": 0.35, "p_share": 0.30, "k_share": 0.35},
+        "开花": {"trigger_moisture_pct": 43.0, "target_moisture_pct": 48.2, "kc": 1.10, "n_share": 0.10, "p_share": 0.00, "k_share": 0.20},
+        "灌浆": {"trigger_moisture_pct": 40.6, "target_moisture_pct": 45.8, "kc": 0.80, "n_share": 0.00, "p_share": 0.00, "k_share": 0.00},
+        "成熟": {"trigger_moisture_pct": 35.8, "target_moisture_pct": 39.8, "kc": 0.45, "n_share": 0.00, "p_share": 0.00, "k_share": 0.00}
       }
     }
   }

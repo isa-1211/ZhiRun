@@ -98,12 +98,11 @@ def main() -> None:
     parser.add_argument("--crop", required=True, choices=CONFIG["crops"].keys())
     parser.add_argument("--stage", required=True)
     parser.add_argument("--area-mu", type=float, required=True)
-    parser.add_argument("--soil-moisture-20", type=float, required=True)
-    parser.add_argument("--field-capacity", type=float, required=True)
+    parser.add_argument("--soil-moisture", type=float, required=True)
     parser.add_argument("--rain-forecast", type=float, default=0)
     parser.add_argument("--eto", type=float, required=True)
     args = parser.parse_args()
-    decision = recommend(args.crop, args.stage, [args.soil_moisture_20], args.field_capacity,
+    decision = recommend(args.crop, args.stage, args.soil_moisture,
                          args.rain_forecast, args.eto, 8)
     print(json.dumps(build_job(args.area_mu, decision), ensure_ascii=False, indent=2))
 

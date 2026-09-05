@@ -430,6 +430,58 @@ static void set_metric(unsigned index, bool available, double value,
     }
 }
 
+static void update_weather_page(const char *json) {
+    if (!weather_label || !json) return;
+    static const char *keys[] = {
+        "temperature_2m", "relative_humidity_2m", "dew_point_2m",
+        "apparent_temperature", "precipitation", "rain", "showers",
+        "snowfall", "weather_code", "cloud_cover", "pressure_msl",
+        "surface_pressure", "wind_speed_10m", "wind_direction_10m",
+        "wind_gusts_10m", "is_day", "uv_index", "uv_index_clear_sky",
+        "visibility", "evapotranspiration", "et0_fao_evapotranspiration",
+        "vapour_pressure_deficit"
+    };
+    static const char *labels[] = {
+        "Temperature 2m", "Relative humidity", "Dew point", "Feels like",
+        "Precipitation", "Rain", "Showers", "Snowfall", "Weather code",
+        "Cloud cover", "Sea-level pressure", "Surface pressure", "Wind speed",
+        "Wind direction", "Wind gusts", "Day/night", "UV index",
+        "Clear-sky UV", "Visibility", "Evapotranspiration", "Reference ET0",
+        "Vapour pressure deficit"
+    };
+    static const char *units[] = {
+        "C", "%", "C", "C", "mm", "mm", "mm", "cm", "", "%", "hPa",
+        "hPa", "km/h", "deg", "km/h", "", "", "", "m", "mm", "mm", "kPa"
+    };
+    static const unsigned precision[] = {
+        1, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 2, 2, 3
+    };
+    char text[2400] = "Weather API current conditions\n";
+    size_t used = strlen(text);
+    for (unsigned i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        double value;
+        if (!json_number(json, keys[i], &value)) continue;
+        char line[128];
+        if (strcmp(keys[i], "is_day") == 0) {
+            snprintf(line, sizeof(line), "%s: %s\n", labels[i], value >= 0.5 ? "day" : "night");
+        } else if (strcmp(keys[i], "weather_code") == 0) {
+            snprintf(line, sizeof(line), "%s: %.0f\n", labels[i], value);
+        } else if (precision[i] == 0) {
+            snprintf(line, sizeof(line), "%s: %.0f %s\n", labels[i], value, units[i]);
+        } else {
+            snprintf(line, sizeof(line), "%s: %.*f %s\n", labels[i], precision[i], value, units[i]);
+        }
+        size_t length = strlen(line);
+        if (used + length + 1 >= sizeof(text)) break;
+        memcpy(text + used, line, length + 1);
+        used += length;
+    }
+    if (used == strlen("Weather API current conditions\n"))
+        snprintf(text, sizeof(text), "Weather API unavailable\nUsing local sensor data below\nAir temp %.1f C\nAir humidity %.1f %%\nWind %.1f m/s\nRain %.1f mm",
+                 0.0, 0.0, 0.0, 0.0);
+    lv_label_set_text(weather_label, text);
+}
+
 static void refresh(lv_timer_t *timer) {
     (void)timer;
     fprintf(stderr, "HMI_REFRESH begin\n");
@@ -476,11 +528,16 @@ static void refresh(lv_timer_t *timer) {
     lv_label_set_text(source_label, source_text);
     fprintf(stderr, "HMI_REFRESH source_updated\n");
 
-    char weather_text[220];
-    snprintf(weather_text, sizeof(weather_text),
-             "Air temp %.1f C\nAir humidity %.1f %%\nWind %.1f m/s\nRain %.1f mm",
-             values[0], values[1], values[10], values[11]);
-    if (weather_label) lv_label_set_text(weather_label, weather_text);
+    char weather_response[4096];
+    if (request("GET", "/weather", NULL, weather_response, sizeof(weather_response)) == 0)
+        update_weather_page(weather_response);
+    else if (weather_label) {
+        char weather_text[220];
+        snprintf(weather_text, sizeof(weather_text),
+                 "Weather API unavailable\nAir temp %.1f C\nAir humidity %.1f %%\nWind %.1f m/s\nRain %.1f mm",
+                 values[0], values[1], values[10], values[11]);
+        lv_label_set_text(weather_label, weather_text);
+    }
     if (model_label) lv_label_set_text(model_label,
         "Model: server\nExtraTrees multi-output policy\nDaily 12:00 automatic run; manual work order available\nMissing fertilizer data allows water-only irrigation; invalid soil data blocks safely");
 
@@ -657,6 +714,8 @@ static void build_dashboard(void) {
      * user scroll vertically through all cards on the 800x480 display. */
     lv_obj_add_flag(pages[0], LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(pages[0], LV_DIR_VER);
+    lv_obj_add_flag(pages[1], LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(pages[1], LV_DIR_VER);
     for (unsigned i = 1; i < 5; i++) lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
 
     static const char *names[] = {

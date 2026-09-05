@@ -1,4 +1,4 @@
-"""按农田坐标获取实时预报与SoilGrids静态土壤先验。"""
+"""按农田坐标获取天气预报；土壤数据必须来自现场传感器。"""
 
 from __future__ import annotations
 
@@ -23,23 +23,12 @@ def fetch(latitude: float, longitude: float) -> dict:
         "latitude": latitude, "longitude": longitude, "timezone": "Asia/Shanghai", "forecast_days": 7,
         "daily": "et0_fao_evapotranspiration,precipitation_sum,temperature_2m_max,temperature_2m_min",
     })
-    soil = get_json("https://rest.isric.org/soilgrids/v2.0/properties/query", {
-        "lat": latitude, "lon": longitude,
-        "property": ["phh2o", "soc", "nitrogen", "clay", "sand", "silt", "bdod", "cec"],
-        "depth": ["0-5cm", "5-15cm", "15-30cm", "30-60cm"], "value": "mean",
-    })
-    layers = {}
-    for layer in soil["properties"]["layers"]:
-        factor = layer["unit_measure"]["d_factor"]
-        layers[layer["name"]] = {d["label"]: (None if d["values"]["mean"] is None else d["values"]["mean"] / factor)
-                                  for d in layer["depths"]}
     return {
         "location": {"latitude": latitude, "longitude": longitude},
         "forecast": forecast["daily"],
-        "soilgrids": layers,
         "sources": {
             "forecast": "Open-Meteo (FAO ET0 and weather forecast)",
-            "soil": "ISRIC SoilGrids 2.0, 250 m prediction; must be replaced/corrected by field laboratory tests",
+            "soil": "未获取；运行时必须使用现场土壤传感器",
         },
     }
 

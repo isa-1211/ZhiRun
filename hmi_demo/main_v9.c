@@ -31,12 +31,14 @@ static lv_obj_t *weather_label;
 static lv_obj_t *model_label;
 static lv_obj_t *network_label;
 static lv_obj_t *wifi_scan_label;
+static lv_obj_t *wifi_network_list;
 static lv_obj_t *wifi_ssid_input;
 static lv_obj_t *wifi_password_input;
 static lv_obj_t *wifi_keyboard;
 static bool wifi_scan_active;
 static bool wifi_connect_active;
 static uint32_t wifi_connect_start_tick;
+static char wifi_scan_ssids[12][160];
 static lv_obj_t *valve_detail_label;
 /* N / P / K dosing pumps and the mixing-tank outlet pump, in that order. */
 static lv_obj_t *pump_state_labels[4];
@@ -106,6 +108,46 @@ static void wifi_scan_start(lv_event_t *event) {
     lv_label_set_text(wifi_scan_label, "Scanning nearby Wi-Fi...");
 }
 
+static void wifi_network_selected(lv_event_t *event) {
+    lv_obj_t *button = lv_event_get_target(event);
+    const char *ssid = (const char *)lv_event_get_user_data(event);
+    if (!ssid || !*ssid || !wifi_ssid_input) return;
+    lv_textarea_set_text(wifi_ssid_input, ssid);
+    lv_textarea_set_text(wifi_password_input, "");
+    if (wifi_keyboard) {
+        lv_keyboard_set_textarea(wifi_keyboard, wifi_password_input);
+        lv_obj_clear_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_add_state(button, LV_STATE_CHECKED);
+    lv_label_set_text(wifi_scan_label, "Selected network; enter password, then CONNECT");
+}
+
+static void wifi_network_list_clear(void) {
+    if (wifi_network_list) lv_obj_clean(wifi_network_list);
+    memset(wifi_scan_ssids, 0, sizeof(wifi_scan_ssids));
+}
+
+static void wifi_network_add(unsigned index, const char *ssid, int rssi, bool secured) {
+    if (!wifi_network_list || index >= 12 || !ssid || !*ssid) return;
+    snprintf(wifi_scan_ssids[index], sizeof(wifi_scan_ssids[index]), "%s", ssid);
+    lv_obj_t *button = lv_btn_create(wifi_network_list);
+    lv_obj_set_pos(button, 3, 3 + (int)index * 34);
+    lv_obj_set_size(button, 748, 30);
+    lv_obj_add_flag(button, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_add_event_cb(button, wifi_network_selected, LV_EVENT_CLICKED,
+                        wifi_scan_ssids[index]);
+    lv_obj_t *name = lv_label_create(button);
+    char label[220];
+    snprintf(label, sizeof(label), "%s%s", secured ? "[LOCK] " : "[OPEN] ", ssid);
+    lv_label_set_text(name, label);
+    lv_obj_align(name, LV_ALIGN_LEFT_MID, 8, 0);
+    lv_obj_t *signal = lv_label_create(button);
+    char signal_text[32];
+    snprintf(signal_text, sizeof(signal_text), "%d dBm", rssi);
+    lv_label_set_text(signal, signal_text);
+    lv_obj_align(signal, LV_ALIGN_RIGHT_MID, -8, 0);
+}
+
 static void wifi_scan_poll(void) {
     if (!wifi_scan_active || access(WIFI_SCAN_STATUS_FILE, F_OK) != 0) return;
     FILE *status = fopen(WIFI_SCAN_STATUS_FILE, "r");
@@ -124,24 +166,34 @@ static void wifi_scan_poll(void) {
         lv_label_set_text(wifi_scan_label, "No Wi-Fi networks found");
         return;
     }
-    char text[1200] = "Nearby networks:\n";
-    size_t used = strlen(text);
+    wifi_network_list_clear();
     char line[320];
     unsigned count = 0;
     while (fgets(line, sizeof(line), results) && count < 12) {
         if (strncmp(line, "bssid /", 7) == 0 || strncmp(line, "Selected", 8) == 0) continue;
-        char *ssid = strrchr(line, '\t');
-        if (!ssid) continue;
-        ssid++;
+        char *columns[5] = {0};
+        char *cursor = line;
+        for (unsigned column = 0; column < 5; column++) {
+            columns[column] = cursor;
+            char *tab = strchr(cursor, '\t');
+            if (!tab) break;
+            *tab = 0;
+            cursor = tab + 1;
+        }
+        if (!columns[4]) continue;
+        char *ssid = columns[4];
         ssid[strcspn(ssid, "\r\n")] = 0;
         if (!*ssid) continue;
-        int added = snprintf(text + used, sizeof(text) - used, "%u. %s\n", ++count, ssid);
-        if (added < 0 || (size_t)added >= sizeof(text) - used) break;
-        used += (size_t)added;
+        int rssi = atoi(columns[2] ? columns[2] : "0");
+        bool secured = columns[3] && strchr(columns[3], 'W') != NULL;
+        wifi_network_add(count++, ssid, rssi, secured);
     }
     fclose(results);
-    if (count == 0) strcpy(text, "No Wi-Fi networks found");
-    lv_label_set_text(wifi_scan_label, text);
+    if (count == 0) {
+        lv_label_set_text(wifi_scan_label, "No Wi-Fi networks found");
+    } else {
+        lv_label_set_text(wifi_scan_label, "Tap a network, enter its password, then CONNECT");
+    }
 }
 
 static int run_wpa_value(const char *id, const char *key, const char *value) {
@@ -628,6 +680,11 @@ static void build_dashboard(void) {
      * job detail line, so let it scroll vertically like the data page. */
     lv_obj_add_flag(pages[2], LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(pages[2], LV_DIR_VER);
+    /* Network setup is touch-first: the scan result area is an independent
+     * scrollable list so all nearby SSIDs remain selectable on the 800x480
+     * display while the on-screen keyboard is open. */
+    lv_obj_add_flag(pages[4], LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(pages[4], LV_DIR_VER);
 
     lv_obj_t *control_panel = make_panel(pages[2], 7, 7, 360, 66);
     lv_obj_t *control_title = lv_label_create(control_panel);
@@ -729,6 +786,14 @@ static void build_dashboard(void) {
     lv_obj_center(connect_button_label);
 
     wifi_scan_label = page_text(pages[4], "Tap SCAN to list nearby networks", 7, 132, 760);
+    wifi_network_list = lv_obj_create(pages[4]);
+    lv_obj_set_pos(wifi_network_list, 7, 168);
+    lv_obj_set_size(wifi_network_list, 760, 135);
+    lv_obj_set_style_bg_color(wifi_network_list, lv_color_hex(0x0B1017), 0);
+    lv_obj_set_style_border_color(wifi_network_list, lv_color_hex(0x26364C), 0);
+    lv_obj_set_style_pad_all(wifi_network_list, 0, 0);
+    lv_obj_add_flag(wifi_network_list, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(wifi_network_list, LV_DIR_VER);
     wifi_keyboard = lv_keyboard_create(screen);
     lv_obj_set_size(wifi_keyboard, 800, 180);
     lv_obj_set_pos(wifi_keyboard, 0, 300);

@@ -8,8 +8,10 @@ important parts of the web frontend without running a browser:
 - wind speed and rainfall;
 - N/P/K dosing-pump and mixing-tank outlet-pump states;
 - touch stop button for the `/fertigation/stop` safety API.
-- offline Wi-Fi setup from the Network page: scan nearby SSIDs, enter a
-  password with the on-screen keyboard, and connect without the server.
+- offline Wi-Fi setup from the Network page: scan nearby SSIDs, tap a network
+  in the touch list, enter its password with the on-screen keyboard, and
+  connect without the server. Open networks can be connected without a
+  password; the list and page can be scrolled on the 800x480 display.
 
 The full model remains on the server. The board only requests `/data` and
 `/valve/config` over Ethernet or Wi-Fi.

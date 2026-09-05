@@ -504,7 +504,7 @@
         </div>
       </section></aside>
   </section>
-  <section class="farm-bottom"><section class="farm-card farm-health"><div class="farm-health-grid"><div><h2>农情概览</h2><p id="farmSummary">正在汇总实时环境数据…</p><div class="farm-score-factors" id="farmScoreFactors"></div></div><div class="farm-score"><b id="farmScore">--</b><span id="farmScoreMeta">模型参考评分</span></div></div></section><section class="farm-card farm-advice"><div class="farm-advice-head"><div><h2>V2 水肥工作单</h2><div style="margin-top:4px;color:#718076;font-size:12px">实时环境自动输入 · 服务器模型</div></div><div class="farm-advice-controls"><button class="farm-primary" id="farmPredictBtn" onclick="farmPredict()">生成工作单</button></div></div><div class="farm-advice-result" id="farmAdviceResult"><div class="farm-advice-note">三种母液浓度可在泵组右上角设置；模型不会直接启动当前测试泵。</div></div></section></section>
+  <section class="farm-bottom"><section class="farm-card farm-health"><div class="farm-health-grid"><div><h2>农情概览</h2><p id="farmSummary">正在汇总实时环境数据…</p><div class="farm-score-factors" id="farmScoreFactors"></div></div><div class="farm-score"><b id="farmScore">--</b><span id="farmScoreMeta">模型参考评分</span></div></div></section><section class="farm-card farm-advice"><div class="farm-advice-head"><div><h2>V2 水肥工作单</h2><div style="margin-top:4px;color:#718076;font-size:12px">实时环境自动输入 · 服务器模型</div></div><div class="farm-advice-controls"><button class="farm-primary" id="farmPredictBtn" onclick="farmPredict()">生成工作单</button><button class="farm-secondary" id="farmRunBtn" onclick="executeModelJob('farmRunBtn','farmRunStatus')" disabled>执行工作单</button><span class="model-run-status" id="farmRunStatus">请先生成并审核工作单</span></div></div><div class="farm-advice-result" id="farmAdviceResult"><div class="farm-advice-note">三种母液浓度可在泵组右上角设置；模型不会直接启动当前测试泵。</div></div></section></section>
   <footer class="farm-foot"><span id="farmUpdated">等待实时数据</span><span>智润设备实时监控</span></footer>
 </div></main>
 <div class="farm-modal" id="farmSettings" onclick="farmModalBackdrop(event)"><div class="farm-dialog" role="dialog" aria-modal="true" aria-labelledby="farmSettingsTitle"><div class="farm-dialog-head"><h2 id="farmSettingsTitle">V2 母液浓度</h2><button class="farm-dialog-close" title="关闭" onclick="closeFarmSettings()">×</button></div><section class="farm-setting-group"><h3>目标养分浓度</h3><div class="farm-settings-grid"><div class="farm-setting"><label>N (g/L)</label><input id="farmNConcentration" type="number" min="0.1" max="10000" step="0.1"></div><div class="farm-setting"><label>P₂O₅ (g/L)</label><input id="farmPConcentration" type="number" min="0.1" max="10000" step="0.1"></div><div class="farm-setting"><label>K₂O (g/L)</label><input id="farmKConcentration" type="number" min="0.1" max="10000" step="0.1"></div></div></section><div class="farm-settings-status" id="farmSettingsOut"></div><div class="farm-dialog-actions"><button class="farm-secondary" onclick="closeFarmSettings()">取消</button><button class="farm-primary" onclick="saveFarmSettings()">保存浓度</button></div></div></div>
@@ -1051,24 +1051,25 @@ async function predict(){
   }catch(e){$('mOut').textContent='计算失败：'+e.message;return null;}
   finally{$('predictBtn').disabled=false;}
 }
-async function executeModelJob(){
+async function executeModelJob(buttonId='modelRunBtn',statusId='modelRunStatus'){
   const params=modelJobParams();
-  if(!Object.values(params).some(value=>value>0)){const el=$('modelRunStatus');if(el)el.textContent='当前工作单没有可执行目标';return false;}
+  const button=$(buttonId),status=$(statusId);
+  if(!Object.values(params).some(value=>value>0)){if(status)status.textContent='当前工作单没有可执行目标';if(button)button.disabled=true;return false;}
   const summary='N '+modelNumber(params.n_target_l,3)+' L，P '+modelNumber(params.p_target_l,3)+' L，K '+modelNumber(params.k_target_l,3)+' L，出口泵 '+Math.round(params.outlet_run_s)+' 秒';
   if(!confirm('确认下发水肥工作单？\n'+summary))return false;
-  const button=$('modelRunBtn'),status=$('modelRunStatus');button.disabled=true;status.textContent='正在下发工作单…';
+  if(button)button.disabled=true;if(status)status.textContent='正在下发工作单…';
   try{
     const response=await fetchTO(inferBase()+'/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(params)},8000),data=await response.json();
     if(!response.ok||!data.ok)throw new Error(valveMessage(data.message,'工作单下发失败'));
-    status.textContent='工作单已下发，设备开始执行';$('vOut').textContent=status.textContent;if($('farmValveOut'))$('farmValveOut').textContent=status.textContent;setTimeout(loadValve,700);return true;
-  }catch(error){status.textContent=error.message||'工作单下发失败';button.disabled=false;return false;}
+    const successText='工作单已下发，设备开始执行';if(status)status.textContent=successText;$('vOut').textContent=successText;if($('farmValveOut'))$('farmValveOut').textContent=successText;setTimeout(loadValve,700);return true;
+  }catch(error){if(status)status.textContent=error.message||'工作单下发失败';if(button)button.disabled=false;return false;}
 }
 async function stopFertigation(){try{const r=await fetchTO('/fertigation/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'},8000),d=await r.json();const text=d.ok?'全部停止指令已发送':valveMessage(d.message,'停止指令失败');$('vOut').textContent=text;if($('farmValveOut'))$('farmValveOut').textContent=text;if($('modelRunStatus'))$('modelRunStatus').textContent=text;setTimeout(loadValve,700);return !!d.ok;}catch(e){const text='停止指令发送失败';$('vOut').textContent=text;if($('modelRunStatus'))$('modelRunStatus').textContent=text;return false;}}
 async function farmPredict(){
-  $('farmPredictBtn').disabled=true;$('farmAdviceResult').innerHTML='<div class="farm-advice-note">服务器正在运行 V2 模型…</div>';
-  const d=await predict();if(!d){$('farmAdviceResult').innerHTML='<div class="farm-advice-note">'+$('mOut').textContent+'</div>';$('farmPredictBtn').disabled=false;return;}
+  $('farmPredictBtn').disabled=true;$('farmRunBtn').disabled=true;$('farmRunStatus').textContent='等待模型结果';$('farmAdviceResult').innerHTML='<div class="farm-advice-note">服务器正在运行 V2 模型…</div>';
+  const d=await predict();if(!d){$('farmAdviceResult').innerHTML='<div class="farm-advice-note">'+$('mOut').textContent+'</div>';$('farmPredictBtn').disabled=false;$('farmRunStatus').textContent='请先生成并审核工作单';return;}
   const t=d.decision,pumps=d.result.hardware.pumps,cards=[['灌水量',modelNumber(t.irrigation_m3_mu,1)+' m³/亩'],['N 母液',modelNumber(pumps.N_PUMP.target_solution_l,2)+' L'],['P₂O₅ 母液',modelNumber(pumps.P_PUMP.target_solution_l,2)+' L'],['K₂O 母液',modelNumber(pumps.K_PUMP.target_solution_l,2)+' L']];
-  $('farmAdviceResult').innerHTML=cards.map(item=>'<div class="farm-advice-item"><span>'+item[0]+'</span><b>'+item[1]+'</b></div>').join('')+'<div class="farm-advice-note"><b>模型阶段：'+t.stage+'</b>：'+(t.irrigate?(t.fertigate?'建议执行水肥工作单':'仅建议灌水'):'当前安全门要求保持关闭')+'。预测结果不会自动执行，需审核后下发。</div>';$('farmPredictBtn').disabled=false;
+  const executable=Object.values(modelJobParams(d)).some(value=>value>0);$('farmAdviceResult').innerHTML=cards.map(item=>'<div class="farm-advice-item"><span>'+item[0]+'</span><b>'+item[1]+'</b></div>').join('')+'<div class="farm-advice-note"><b>模型阶段：'+t.stage+'</b>：'+(t.irrigate?(t.fertigate?'建议执行水肥工作单':'仅建议灌水'):'当前安全门要求保持关闭')+'。预测结果不会自动执行，需审核后下发。</div>';$('farmPredictBtn').disabled=false;$('farmRunBtn').disabled=!executable;$('farmRunStatus').textContent=executable?'等待人工确认':(t.execution_reason||'当前没有可执行目标');
 }
 // ---- 面板3: 联网 ----
 function renderNet(){

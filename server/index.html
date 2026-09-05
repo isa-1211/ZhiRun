@@ -307,6 +307,15 @@
      .farm-wifi-pop,.farm-modal,.farm-dialog{touch-action:auto;-webkit-overflow-scrolling:touch}
      button,a,input,select,textarea{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
    }
+   /* 农场模式是服务器默认入口。生成水肥工作单后页面高度会增加，
+      body 必须允许纵向滚动，否则底部工作单和执行提示会被裁掉。 */
+   body.farm-mode{height:auto;min-height:100vh;overflow-x:hidden;overflow-y:auto;touch-action:pan-y;-webkit-overflow-scrolling:touch}
+   body.farm-mode .farm-view{height:auto;min-height:100vh;overflow:visible}
+   body.farm-mode .farm-app{height:auto;min-height:100vh;overflow:visible;background-attachment:scroll}
+   body.farm-mode .farm-shell{height:auto;min-height:calc(100vh - clamp(24px,4.4vw,68px));overflow:visible}
+   body.farm-mode .farm-bottom,.farm-advice{overflow:visible}
+   .farm-advice-result{min-height:38px;align-content:start}
+   .farm-advice-result .farm-advice-note{overflow-wrap:anywhere;white-space:normal}
 </style>
 <style>body:not(.farm-mode)>.top,body:not(.farm-mode)>.wrap{display:none!important}.farm-back,.style-switch{display:none!important}</style></head><body>
 <div class="top">

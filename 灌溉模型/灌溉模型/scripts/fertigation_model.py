@@ -673,6 +673,12 @@ class FertigationModel:
         elif not irrigation_demand:
             moisture_value = float(environment.soil_moisture_pct)
             trigger_value = float(threshold["dynamic_trigger_moisture_pct"])
+            rain_2d = float(forecast["rain_next_2d_mm"])
+            rain_guard_limit = max(
+                5.0,
+                float(stage_cfg["kc"]) * float(forecast["eto_daily_mm"])
+                - rain_2d * CONFIG["defaults"]["effective_rain_fraction"],
+            )
             if moisture_value > trigger_value:
                 relation = "高于"
             elif moisture_value < trigger_value:
@@ -680,10 +686,16 @@ class FertigationModel:
             else:
                 relation = "等于"
             execution_status = "not_needed"
-            execution_reason = (
-                f"单个土壤探针水分为{environment.soil_moisture_pct:.1f}%，"
-                f"{relation}本阶段{threshold['dynamic_trigger_moisture_pct']:.1f}%的灌溉触发线，当前无需灌溉"
-            )
+            if moisture_value <= trigger_value and rain_2d >= rain_guard_limit:
+                execution_reason = (
+                    f"单个土壤探针水分为{moisture_value:.1f}%，低于本阶段{trigger_value:.1f}%的灌溉触发线，"
+                    f"但未来2日预报降雨{rain_2d:.1f} mm达到雨量保护阈值{rain_guard_limit:.1f} mm，当前暂不灌溉"
+                )
+            else:
+                execution_reason = (
+                    f"单个土壤探针水分为{moisture_value:.1f}%，"
+                    f"{relation}本阶段{trigger_value:.1f}%的灌溉触发线，当前无需灌溉"
+                )
         else:
             execution_status = "below_minimum"
             execution_reason = "模型建议灌水量低于0.5 m³/亩的最小执行量"

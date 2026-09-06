@@ -7,6 +7,7 @@
 """
 import io
 import json
+import math
 import os
 import sys
 import threading
@@ -184,6 +185,65 @@ def queue_farm_assessment(device_id, latest):
 
 def json_bytes(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def compact_board_prediction(payload):
+    """Flatten a model response for the memory-constrained native board HMI."""
+    if not isinstance(payload, dict):
+        return {"ok": False, "execution_status": "model_error", "reason_code": "model_error"}
+
+    result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+    decision = payload.get("decision") if isinstance(payload.get("decision"), dict) else {}
+    if not decision and isinstance(result.get("decision"), dict):
+        decision = result["decision"]
+    job = result.get("job") if isinstance(result.get("job"), dict) else {}
+    targets = job.get("targets_l") if isinstance(job.get("targets_l"), dict) else {}
+    automatic = result.get("automatic_inputs") if isinstance(result.get("automatic_inputs"), dict) else {}
+
+    def number(value, default=0.0):
+        try:
+            parsed = float(value)
+            return parsed if math.isfinite(parsed) else default
+        except (TypeError, ValueError):
+            return default
+
+    status = str(decision.get("execution_status") or "model_error")
+    soil_moisture = decision.get("soil_moisture_pct", automatic.get("soil_moisture_pct"))
+    trigger = decision.get("dynamic_trigger_moisture_pct")
+    rain_next_2d = automatic.get("rain_next_2d_mm")
+    reason_code = status
+    if status == "not_needed":
+        moisture_value = number(soil_moisture, -1.0)
+        trigger_value = number(trigger, -1.0)
+        if number(rain_next_2d) >= 5.0:
+            reason_code = "forecast_rain"
+        elif moisture_value >= 0 and trigger_value >= 0 and moisture_value > trigger_value:
+            reason_code = "moisture_above_trigger"
+        elif decision.get("irrigate"):
+            reason_code = "below_minimum"
+
+    compact = {
+        "ok": bool(payload.get("ok")),
+        "execution_status": status,
+        "reason_code": reason_code,
+        "irrigate": bool(decision.get("irrigate")),
+        "fertigate": bool(decision.get("fertigate")),
+        "irrigation_m3_mu": number(decision.get("irrigation_m3_mu")),
+        "nitrogen_kg_mu": number(decision.get("nitrogen_kg_mu")),
+        "p2o5_kg_mu": number(decision.get("p2o5_kg_mu")),
+        "k2o_kg_mu": number(decision.get("k2o_kg_mu")),
+        "soil_moisture_pct": number(soil_moisture, -1.0),
+        "trigger_moisture_pct": number(trigger, -1.0),
+        "rain_next_2d_mm": number(rain_next_2d, -1.0),
+        "n_target_l": number(targets.get("N")),
+        "p_target_l": number(targets.get("P")),
+        "k_target_l": number(targets.get("K")),
+        "outlet_run_s": number(job.get("outlet_run_s")),
+    }
+    compact["can_execute"] = status == "ready" and any(
+        compact[key] > 0 for key in ("n_target_l", "p_target_l", "k_target_l", "outlet_run_s")
+    )
+    return compact
 
 
 def safe_device_id(value):
@@ -867,14 +927,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-    def proxy_fertigation(self, endpoint, payload=None):
+    def proxy_fertigation(self, endpoint, payload=None, compact=False):
         data = None if payload is None else json.dumps(payload).encode("utf-8")
         request = Request(FERTIGATION_URL + endpoint, data=data,
                           headers={"Content-Type": "application/json"} if data else {},
                           method="POST" if data else "GET")
         try:
             with urlopen(request, timeout=20) as response:
-                self.send_json(response.status, json.loads(response.read().decode("utf-8")))
+                response_payload = json.loads(response.read().decode("utf-8"))
+                if compact:
+                    response_payload = compact_board_prediction(response_payload)
+                self.send_json(response.status, response_payload)
         except Exception as exc:
             self.send_json(502, {"ok": False, "error": "fertigation_service_unavailable", "message": str(exc)})
 
@@ -1095,7 +1158,8 @@ class Handler(BaseHTTPRequestHandler):
                 device_id = current_device_id(obj.get("device_id"))
                 model_input = dict(_latest_by_device.get(device_id, {})) if device_id else {}
             model_input.update(obj)
-            self.proxy_fertigation("/predict", model_input)
+            compact = parse_qs(parsed.query).get("compact", [""])[0] == "1"
+            self.proxy_fertigation("/predict", model_input, compact=compact)
             return
 
         if path == "/outlet/test":

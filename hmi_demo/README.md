@@ -7,14 +7,20 @@ important parts of the web frontend without running a browser:
 - soil moisture, temperature, pH, nitrogen, phosphorus, and potassium;
 - wind speed and rainfall;
 - N/P/K dosing-pump and mixing-tank outlet-pump states;
-- touch stop button for the `/fertigation/stop` safety API.
+- server-side model work-order generation from live sensor/weather data;
+- editable N/P2O5/K2O solution concentrations, compact work-order review,
+  explicit execution through `/fertigation/run`, and touch stop through
+  `/fertigation/stop`;
 - offline Wi-Fi setup from the Network page: scan nearby SSIDs, tap a network
   in the touch list, enter its password with the on-screen keyboard, and
   connect without the server. Open networks can be connected without a
   password; the list and page can be scrolled on the 800x480 display.
 
-The full model remains on the server. The board only requests `/data` and
-`/valve/config` over Ethernet or Wi-Fi.
+The full model remains on the server. The board uses `/data`, `/weather`, and
+`/valve/config` for status. Its Model page requests the existing
+`/fertigation/predict?compact=1` response so the 98 MB target does not need to
+parse the full inference document. Generating a work order never starts a pump;
+the operator must tap `EXECUTE WORK ORDER` after reviewing an executable result.
 
 ## Official port assumptions
 

@@ -11,6 +11,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 extern void lv_port_init(int width, int height, int rotation);
@@ -29,6 +30,15 @@ static lv_obj_t *pump_label;
 static lv_obj_t *pages[5];
 static lv_obj_t *weather_label;
 static lv_obj_t *model_label;
+static lv_obj_t *model_inputs[3];
+static lv_obj_t *model_keyboard;
+static lv_obj_t *model_action_label;
+static lv_obj_t *model_generate_button;
+static lv_obj_t *model_execute_button;
+static bool model_request_active;
+static pid_t model_request_pid = -1;
+static bool model_job_ready;
+static double model_job_targets[4];
 static lv_obj_t *network_label;
 static lv_obj_t *wifi_scan_label;
 static lv_obj_t *wifi_network_list;
@@ -57,6 +67,8 @@ static unsigned current_page;
 #define WIFI_SCAN_FILE "/tmp/zhirun_hmi_wifi_scan.txt"
 #define WIFI_SCAN_STATUS_FILE "/tmp/zhirun_hmi_wifi_scan.status"
 #define WIFI_CONNECT_STATUS_FILE "/tmp/zhirun_hmi_wifi_connect.status"
+#define MODEL_RESULT_FILE "/tmp/zhirun_hmi_model_result.json"
+#define MODEL_STATUS_FILE "/tmp/zhirun_hmi_model_result.status"
 
 static uint8_t *boot_frame_data;
 static lv_image_dsc_t boot_frame_dsc;
@@ -272,6 +284,7 @@ static void wifi_input_event(lv_event_t *event) {
     if (!wifi_keyboard) return;
     lv_event_code_t code = lv_event_get_code(event);
     if (code == LV_EVENT_FOCUSED) {
+        if (model_keyboard) lv_obj_add_flag(model_keyboard, LV_OBJ_FLAG_HIDDEN);
         lv_keyboard_set_textarea(wifi_keyboard, lv_event_get_target(event));
         lv_obj_clear_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
     } else if (code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
@@ -323,8 +336,8 @@ static void start_boot_audio(void) {
     _exit(127);
 }
 
-static int request(const char *method, const char *path, const char *body,
-                   char *out, size_t cap) {
+static int request_timeout(const char *method, const char *path, const char *body,
+                           char *out, size_t cap, int timeout_seconds) {
     char port[16], message[1024];
     struct addrinfo hints = {0}, *address = NULL;
     snprintf(port, sizeof(port), "%d", HMI_SERVER_PORT);
@@ -337,7 +350,7 @@ static int request(const char *method, const char *path, const char *body,
         freeaddrinfo(address);
         return -1;
     }
-    struct timeval timeout = {.tv_sec = 2, .tv_usec = 0};
+    struct timeval timeout = {.tv_sec = timeout_seconds, .tv_usec = 0};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
     if (connect(fd, address->ai_addr, address->ai_addrlen) != 0) {
@@ -371,6 +384,11 @@ static int request(const char *method, const char *path, const char *body,
     if (!body_start) return -1;
     memmove(out, body_start + 4, strlen(body_start + 4) + 1);
     return 0;
+}
+
+static int request(const char *method, const char *path, const char *body,
+                   char *out, size_t cap) {
+    return request_timeout(method, path, body, out, cap, 2);
 }
 
 static const char *json_value(const char *json, const char *key) {
@@ -416,6 +434,192 @@ static bool json_string(const char *json, const char *key, char *out, size_t cap
     memcpy(out, value, length);
     out[length] = 0;
     return true;
+}
+
+static void model_set_execute_enabled(bool enabled) {
+    model_job_ready = enabled;
+    if (!model_execute_button) return;
+    if (enabled) lv_obj_clear_state(model_execute_button, LV_STATE_DISABLED);
+    else lv_obj_add_state(model_execute_button, LV_STATE_DISABLED);
+}
+
+static void model_input_event(lv_event_t *event) {
+    if (!model_keyboard) return;
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_FOCUSED) {
+        if (wifi_keyboard) lv_obj_add_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
+        lv_keyboard_set_textarea(model_keyboard, lv_event_get_target(event));
+        lv_obj_clear_flag(model_keyboard, LV_OBJ_FLAG_HIDDEN);
+    } else if (code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
+        lv_obj_add_flag(model_keyboard, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static bool model_concentration(unsigned index, double *value) {
+    if (index >= 3 || !model_inputs[index]) return false;
+    const char *text = lv_textarea_get_text(model_inputs[index]);
+    char *end = NULL;
+    double parsed = strtod(text ? text : "", &end);
+    if (!text || end == text || *end != 0 || parsed <= 0.0 || parsed > 10000.0) return false;
+    *value = parsed;
+    return true;
+}
+
+static void model_generate(lv_event_t *event) {
+    (void)event;
+    if (model_request_active) return;
+    double concentration[3];
+    if (!model_concentration(0, &concentration[0]) ||
+        !model_concentration(1, &concentration[1]) ||
+        !model_concentration(2, &concentration[2])) {
+        lv_label_set_text(model_action_label, "Enter N/P/K concentrations from 0.1 to 10000 g/L");
+        return;
+    }
+
+    char body[256];
+    snprintf(body, sizeof(body),
+             "{\"n_concentration_g_l\":%.3f,\"p_concentration_g_l\":%.3f,"
+             "\"k_concentration_g_l\":%.3f}",
+             concentration[0], concentration[1], concentration[2]);
+    unlink(MODEL_RESULT_FILE);
+    unlink(MODEL_STATUS_FILE);
+    pid_t child = fork();
+    if (child < 0) {
+        lv_label_set_text(model_action_label, "Model request could not start");
+        return;
+    }
+    if (child == 0) {
+        char response[4096];
+        int result = request_timeout("POST", "/fertigation/predict?compact=1", body,
+                                     response, sizeof(response), 25);
+        if (result == 0) {
+            FILE *file = fopen(MODEL_RESULT_FILE, "w");
+            if (file) {
+                fputs(response, file);
+                fclose(file);
+            } else {
+                result = -1;
+            }
+        }
+        write_status_file(MODEL_STATUS_FILE, result == 0 ? "done" : "failed");
+        _exit(result == 0 ? 0 : 1);
+    }
+
+    model_request_active = true;
+    model_request_pid = child;
+    model_set_execute_enabled(false);
+    if (model_generate_button) lv_obj_add_state(model_generate_button, LV_STATE_DISABLED);
+    if (model_keyboard) lv_obj_add_flag(model_keyboard, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(model_label, "Generating work order on server...\nLive sensor data and weather forecast are being evaluated.");
+    lv_label_set_text(model_action_label, "Please wait; controls remain responsive");
+}
+
+static const char *model_decision_text(const char *status, const char *reason) {
+    if (strcmp(status, "ready") == 0) return "READY - review targets, then execute";
+    if (strcmp(status, "safety_blocked") == 0) return "BLOCKED - required soil data is missing or invalid";
+    if (strcmp(reason, "forecast_rain") == 0) return "WAIT - rain forecast protection";
+    if (strcmp(reason, "moisture_above_trigger") == 0) return "WAIT - soil moisture is above the trigger";
+    if (strcmp(reason, "below_minimum") == 0) return "WAIT - calculated job is below minimum volume";
+    if (strcmp(status, "not_needed") == 0) return "WAIT - irrigation is not needed";
+    return "Model result unavailable";
+}
+
+static void model_poll(lv_timer_t *timer) {
+    (void)timer;
+    if (!model_request_active || access(MODEL_STATUS_FILE, F_OK) != 0) return;
+    char state[16] = "failed";
+    FILE *status_file = fopen(MODEL_STATUS_FILE, "r");
+    if (status_file) {
+        fgets(state, sizeof(state), status_file);
+        fclose(status_file);
+    }
+    model_request_active = false;
+    if (model_request_pid > 0) waitpid(model_request_pid, NULL, 0);
+    model_request_pid = -1;
+    if (model_generate_button) lv_obj_clear_state(model_generate_button, LV_STATE_DISABLED);
+    if (strncmp(state, "done", 4) != 0) {
+        model_set_execute_enabled(false);
+        lv_label_set_text(model_label, "Work order generation failed\nCheck the network and server model status.");
+        lv_label_set_text(model_action_label, "No command was sent to the pumps");
+        return;
+    }
+
+    FILE *file = fopen(MODEL_RESULT_FILE, "r");
+    char json[4096];
+    size_t length = file ? fread(json, 1, sizeof(json) - 1, file) : 0;
+    if (file) fclose(file);
+    json[length] = 0;
+    bool ok = false, can_execute = false;
+    char execution_status[40] = "model_error", reason_code[48] = "model_error";
+    double irrigation = 0, nutrient[3] = {0}, soil = -1, trigger = -1, rain = -1;
+    json_boolean(json, "ok", &ok);
+    json_boolean(json, "can_execute", &can_execute);
+    json_string(json, "execution_status", execution_status, sizeof(execution_status));
+    json_string(json, "reason_code", reason_code, sizeof(reason_code));
+    json_number(json, "irrigation_m3_mu", &irrigation);
+    json_number(json, "nitrogen_kg_mu", &nutrient[0]);
+    json_number(json, "p2o5_kg_mu", &nutrient[1]);
+    json_number(json, "k2o_kg_mu", &nutrient[2]);
+    json_number(json, "soil_moisture_pct", &soil);
+    json_number(json, "trigger_moisture_pct", &trigger);
+    json_number(json, "rain_next_2d_mm", &rain);
+    json_number(json, "n_target_l", &model_job_targets[0]);
+    json_number(json, "p_target_l", &model_job_targets[1]);
+    json_number(json, "k_target_l", &model_job_targets[2]);
+    json_number(json, "outlet_run_s", &model_job_targets[3]);
+
+    if (!ok) {
+        model_set_execute_enabled(false);
+        lv_label_set_text(model_label, "Server returned an invalid model result\nNo executable work order was created.");
+        lv_label_set_text(model_action_label, "No command was sent to the pumps");
+        return;
+    }
+    char soil_text[24] = "--", trigger_text[24] = "--", rain_text[24] = "--";
+    if (soil >= 0) snprintf(soil_text, sizeof(soil_text), "%.1f%%", soil);
+    if (trigger >= 0) snprintf(trigger_text, sizeof(trigger_text), "%.1f%%", trigger);
+    if (rain >= 0) snprintf(rain_text, sizeof(rain_text), "%.1f mm", rain);
+    char summary[640];
+    snprintf(summary, sizeof(summary),
+             "Work order generated\n"
+             "Water %.2f m3/mu | Soil %s | Trigger %s | Rain 2d %s\n"
+             "N %.3f | P2O5 %.3f | K2O %.3f kg/mu\n"
+             "Pump targets: N %.3f L | P %.3f L | K %.3f L | Outlet %.0f s\n"
+             "%s",
+             irrigation, soil_text, trigger_text, rain_text, nutrient[0], nutrient[1], nutrient[2],
+             model_job_targets[0], model_job_targets[1], model_job_targets[2],
+             model_job_targets[3], model_decision_text(execution_status, reason_code));
+    lv_label_set_text(model_label, summary);
+    model_set_execute_enabled(can_execute);
+    lv_label_set_text(model_action_label,
+                      can_execute ? "Work order ready; execution requires a separate tap"
+                                  : "No executable task; all pumps remain off");
+}
+
+static void model_execute(lv_event_t *event) {
+    (void)event;
+    if (!model_job_ready) return;
+    char body[256], response[1024];
+    snprintf(body, sizeof(body),
+             "{\"n_target_l\":%.3f,\"p_target_l\":%.3f,\"k_target_l\":%.3f,"
+             "\"outlet_run_s\":%.3f}",
+             model_job_targets[0], model_job_targets[1], model_job_targets[2], model_job_targets[3]);
+    if (request("POST", "/fertigation/run", body, response, sizeof(response)) == 0) {
+        model_set_execute_enabled(false);
+        lv_label_set_text(model_action_label, "Work order queued; follow progress on the Valves page");
+    } else {
+        lv_label_set_text(model_action_label, "Execution failed; controller may be offline");
+    }
+}
+
+static void model_stop(lv_event_t *event) {
+    (void)event;
+    char response[1024];
+    if (request("POST", "/fertigation/stop", "{}", response, sizeof(response)) == 0) {
+        model_set_execute_enabled(false);
+        lv_label_set_text(model_action_label, "STOP ALL queued");
+    } else {
+        lv_label_set_text(model_action_label, "STOP ALL failed; check controller connection");
+    }
 }
 
 static void set_metric(unsigned index, bool available, double value,
@@ -538,9 +742,6 @@ static void refresh(lv_timer_t *timer) {
                  values[0], values[1], values[10], values[11]);
         lv_label_set_text(weather_label, weather_text);
     }
-    if (model_label) lv_label_set_text(model_label,
-        "Model: server\nExtraTrees multi-output policy\nDaily 12:00 automatic run; manual work order available\nMissing fertilizer data allows water-only irrigation; invalid soil data blocks safely");
-
     if (request("GET", "/valve/config", NULL, response, sizeof(response)) == 0) {
         static const char *state_keys[] = {"nPumpOn", "pPumpOn", "kPumpOn", "outletPumpOn"};
         bool online = false, pump_on = false, states[4] = {false, false, false, false};
@@ -658,6 +859,8 @@ static lv_obj_t *page_text(lv_obj_t *page, const char *text, int x, int y, int w
 static void show_page(unsigned selected) {
     if (selected >= 5) return;
     current_page = selected;
+    if (wifi_keyboard) lv_obj_add_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
+    if (model_keyboard) lv_obj_add_flag(model_keyboard, LV_OBJ_FLAG_HIDDEN);
     for (unsigned i = 0; i < 5; i++) {
         if (!pages[i]) continue;
         if (i == selected) lv_obj_clear_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
@@ -806,7 +1009,64 @@ static void build_dashboard(void) {
     valve_action_label = page_text(pages[2], "Ready", 7, 311, 733);
     valve_detail_label = page_text(pages[2], "Waiting for valve status", 7, 337, 733);
     weather_label = page_text(pages[1], "Waiting for environment data", 7, 7, 740);
-    model_label = page_text(pages[3], "Model: server\nExtraTrees multi-output policy\nDaily 12:00 automatic run", 7, 7, 740);
+    static const char *concentration_names[] = {"N", "P2O5", "K2O"};
+    static const char *concentration_defaults[] = {"100", "80", "120"};
+    for (unsigned index = 0; index < 3; index++) {
+        int x = 7 + (int)index * 145;
+        lv_obj_t *name = lv_label_create(pages[3]);
+        lv_label_set_text(name, concentration_names[index]);
+        lv_obj_set_pos(name, x, 17);
+        lv_obj_set_style_text_color(name, lv_color_hex(0x91A3BA), 0);
+        model_inputs[index] = lv_textarea_create(pages[3]);
+        lv_obj_set_pos(model_inputs[index], x + 40, 5);
+        lv_obj_set_size(model_inputs[index], 95, 40);
+        lv_textarea_set_one_line(model_inputs[index], true);
+        lv_textarea_set_accepted_chars(model_inputs[index], "0123456789.");
+        lv_textarea_set_max_length(model_inputs[index], 7);
+        lv_textarea_set_text(model_inputs[index], concentration_defaults[index]);
+        lv_obj_add_event_cb(model_inputs[index], model_input_event, LV_EVENT_FOCUSED, NULL);
+        lv_obj_add_event_cb(model_inputs[index], model_input_event, LV_EVENT_READY, NULL);
+        lv_obj_add_event_cb(model_inputs[index], model_input_event, LV_EVENT_CANCEL, NULL);
+    }
+    lv_obj_t *unit = lv_label_create(pages[3]);
+    lv_label_set_text(unit, "g/L");
+    lv_obj_set_pos(unit, 442, 17);
+    lv_obj_set_style_text_color(unit, lv_color_hex(0x91A3BA), 0);
+
+    model_generate_button = lv_btn_create(pages[3]);
+    lv_obj_set_pos(model_generate_button, 500, 5);
+    lv_obj_set_size(model_generate_button, 240, 40);
+    lv_obj_add_flag(model_generate_button, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_add_event_cb(model_generate_button, model_generate, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *generate_label = lv_label_create(model_generate_button);
+    lv_label_set_text(generate_label, "GENERATE WORK ORDER");
+    lv_obj_center(generate_label);
+
+    model_label = page_text(pages[3],
+        "Server model ready\nEnter the measured N/P2O5/K2O solution concentrations, then generate a work order.\nGeneration never starts pumps automatically.",
+        7, 58, 740);
+    model_action_label = page_text(pages[3], "No work order generated", 7, 224, 740);
+
+    model_execute_button = lv_btn_create(pages[3]);
+    lv_obj_set_pos(model_execute_button, 7, 258);
+    lv_obj_set_size(model_execute_button, 360, 42);
+    lv_obj_add_flag(model_execute_button, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_add_event_cb(model_execute_button, model_execute, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_state(model_execute_button, LV_STATE_DISABLED);
+    lv_obj_t *execute_label = lv_label_create(model_execute_button);
+    lv_label_set_text(execute_label, "EXECUTE WORK ORDER");
+    lv_obj_center(execute_label);
+
+    lv_obj_t *model_stop_button = lv_btn_create(pages[3]);
+    lv_obj_set_pos(model_stop_button, 380, 258);
+    lv_obj_set_size(model_stop_button, 360, 42);
+    lv_obj_add_flag(model_stop_button, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_add_event_cb(model_stop_button, model_stop, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_style_bg_color(model_stop_button, lv_color_hex(0x71343A), 0);
+    lv_obj_t *model_stop_label = lv_label_create(model_stop_button);
+    lv_label_set_text(model_stop_label, "STOP ALL");
+    lv_obj_center(model_stop_label);
+
     network_label = page_text(pages[4], "Local Wi-Fi: checking...", 7, 7, 740);
 
     wifi_ssid_input = lv_textarea_create(pages[4]);
@@ -857,6 +1117,11 @@ static void build_dashboard(void) {
     lv_obj_set_size(wifi_keyboard, 800, 180);
     lv_obj_set_pos(wifi_keyboard, 0, 300);
     lv_obj_add_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
+    model_keyboard = lv_keyboard_create(screen);
+    lv_keyboard_set_mode(model_keyboard, LV_KEYBOARD_MODE_NUMBER);
+    lv_obj_set_size(model_keyboard, 800, 180);
+    lv_obj_set_pos(model_keyboard, 0, 300);
+    lv_obj_add_flag(model_keyboard, LV_OBJ_FLAG_HIDDEN);
 
     source_label = lv_label_create(screen);
     lv_label_set_text(source_label, "Waiting for server data");
@@ -865,6 +1130,7 @@ static void build_dashboard(void) {
     lv_obj_set_pos(source_label, 18, 445);
 
     lv_timer_create(refresh, 5000, NULL);
+    lv_timer_create(model_poll, 500, NULL);
 }
 
 static void finish_boot(lv_timer_t *timer) {

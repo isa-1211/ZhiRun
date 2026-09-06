@@ -317,44 +317,16 @@ def decide(body):
     return result["decision"], result
 
 
-def _clamp(value, low=0.0, high=100.0):
-    return max(low, min(high, float(value)))
-
-
-def _band_score(value, ideal_low, ideal_high, hard_low, hard_high):
-    """Return a continuous 0-100 score for an agronomic target band."""
-    if value is None:
-        return None
-    try:
-        value = float(value)
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(value) or value <= hard_low or value >= hard_high:
-        return 0.0
-    if ideal_low <= value <= ideal_high:
-        return 100.0
-    if value < ideal_low:
-        return _clamp(100.0 * (value - hard_low) / (ideal_low - hard_low))
-    return _clamp(100.0 * (hard_high - value) / (hard_high - ideal_high))
-
-
-def _level_score(level):
-    # The model's regional thresholds define low / medium / high. Medium is
-    # the target state; high remains better than deficient but is not ideal.
-    return {"low": 40.0, "medium": 100.0, "high": 75.0}.get(str(level), None)
-
-
 def assess_farm_condition(body):
-    """Create a read-only, model-derived field-condition score.
+    """Return model readiness and safety status without a synthetic score.
 
-    This is deliberately separate from a work order: it runs the same model
-    feature pipeline and quality gates but never exposes a command or starts
-    hardware. Its score is a condition reference, not a yield prediction.
+    The model uses the real single-probe soil readings and current environment
+    to make irrigation/fertigation decisions. A weighted dashboard score was
+    removed because it could hide missing or invalid sensor inputs.
     """
     request = dict(body or {})
-    # Concentrations only satisfy the model's work-order input contract. They
-    # do not affect the condition components below, which come from installed
-    # sensors, crop stage, and the live forecast.
+    # Concentrations satisfy the model's work-order input contract; they do not
+    # change this read-only readiness response.
     request.setdefault("n_concentration_g_l", 100.0)
     request.setdefault("p_concentration_g_l", 80.0)
     request.setdefault("k_concentration_g_l", 120.0)
@@ -366,78 +338,21 @@ def assess_farm_condition(body):
     missing = list(quality.get("missing") or [])
     invalid = list(quality.get("invalid") or [])
 
-    components = []
     moisture = automatic.get("soil_moisture_pct")
     trigger_moisture = decision.get("dynamic_trigger_moisture_pct")
     target_moisture = decision.get("dynamic_target_moisture_pct")
-    if moisture is not None and trigger_moisture is not None and target_moisture is not None:
-        water_score = _band_score(moisture, float(trigger_moisture), float(target_moisture), 0.0, 100.0)
-        water_reason = "单个土壤探针 {:.1f}%；本阶段直接水分目标 {:.1f}-{:.1f}%".format(
-            float(moisture), float(trigger_moisture), float(target_moisture)
-        )
-    else:
-        water_score, water_reason = None, "单个土壤探针水分数据不可用"
-    components.append({"key": "soil_moisture", "name": "土壤水分", "weight": 45,
-                       "score": None if water_score is None else round(water_score), "reason": water_reason})
-
-    ph = automatic.get("soil_ph")
-    ph_score = _band_score(ph, 6.0, 7.5, 5.0, 8.8)
-    chemistry_score = None if ph_score is None else round(ph_score)
-    chemistry_reason = "pH {}".format("--" if ph is None else round(float(ph), 2))
-    components.append({"key": "soil_ph", "name": "土壤 pH", "weight": 25,
-                       "score": chemistry_score, "reason": chemistry_reason})
-
-    nutrient_levels = [decision.get("soil_n_level"), decision.get("soil_p_level"), decision.get("soil_k_level")]
-    nutrient_values = [_level_score(level) for level in nutrient_levels]
-    nutrient_score = None if any(value is None for value in nutrient_values) else round(sum(nutrient_values) / len(nutrient_values))
-    components.append({"key": "nutrients", "name": "养分适宜度", "weight": 15,
-                       "score": nutrient_score,
-                       "reason": "N / P / K：{} / {} / {}".format(*[(level or "--") for level in nutrient_levels])})
-
-    forecast = decision.get("predicted_environment") or {}
-    wind_score = _band_score(forecast.get("wind_max_m_s"), 0.0, 6.0, -0.1, 15.0)
-    temperature_score = _band_score(forecast.get("temperature_mean_c"), 12.0, 30.0, 5.0, 38.0)
-    climate_score = None if wind_score is None or temperature_score is None else round(wind_score * 0.55 + temperature_score * 0.45)
-    components.append({"key": "operation_weather", "name": "作业气象", "weight": 10,
-                       "score": climate_score,
-                       "reason": "未来两日最大风速 {} m/s，平均气温 {}°C".format(
-                           "--" if forecast.get("wind_max_m_s") is None else round(float(forecast["wind_max_m_s"]), 1),
-                           "--" if forecast.get("temperature_mean_c") is None else round(float(forecast["temperature_mean_c"]), 1),
-                       )})
-
     if critical:
-        confidence_score, confidence_reason = 0, "关键土壤数据缺失或异常"
+        summary = "关键土壤数据缺失或异常，自动灌溉保持安全拦截。"
     elif missing or invalid:
-        confidence_score, confidence_reason = 55, "存在非关键缺失或异常输入"
+        summary = "模型已接收可用土壤数据；部分非关键环境输入缺失或异常，仍可按安全规则决策。"
     else:
-        confidence_score, confidence_reason = 100, "本次模型输入完整"
-    components.append({"key": "data_confidence", "name": "数据可信度", "weight": 5,
-                       "score": confidence_score, "reason": confidence_reason})
-
-    available = all(component["score"] is not None for component in components[:3])
-    if critical or not available:
-        score, rating = None, "数据不足"
-        summary = "关键土壤数据不可用于模型决策，评分暂停；自动灌溉保持安全拦截。"
-    else:
-        score = round(sum(component["score"] * component["weight"] / 100 for component in components))
-        # A single critical water condition must not be hidden by good weather
-        # or nutrient readings. This is a reference score, not an average KPI.
-        if water_score is not None and water_score <= 0:
-            score = min(score, 35)
-        elif water_score is not None and water_score < 20:
-            score = min(score, 50)
-        rating = "良好" if score >= 85 else ("可控" if score >= 70 else ("需关注" if score >= 50 else "高风险"))
-        weakest = min(components, key=lambda component: component["score"] * component["weight"])
-        summary = "{}（{}分）：当前最需关注{}，{}。".format(rating, score, weakest["name"], weakest["reason"])
+        summary = "现场土壤输入已接收，模型可按单个土壤探针和实时环境进行决策。"
 
     return {
         "ok": True,
-        "assessment_type": "model_condition_reference_v1",
+        "assessment_type": "model_readiness_v1",
         "generated_at": int(datetime.now().timestamp()),
-        "score": score,
-        "rating": rating,
         "summary": summary,
-        "components": components,
         "critical_inputs": critical,
         "missing_inputs": missing,
         "invalid_inputs": invalid,

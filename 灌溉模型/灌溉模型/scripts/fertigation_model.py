@@ -671,10 +671,18 @@ class FertigationModel:
             execution_status = "safety_blocked"
             execution_reason = "存在灌溉需求，但预报风速超过10 m/s，安全门暂停执行"
         elif not irrigation_demand:
+            moisture_value = float(environment.soil_moisture_pct)
+            trigger_value = float(threshold["dynamic_trigger_moisture_pct"])
+            if moisture_value > trigger_value:
+                relation = "高于"
+            elif moisture_value < trigger_value:
+                relation = "低于"
+            else:
+                relation = "等于"
             execution_status = "not_needed"
             execution_reason = (
                 f"单个土壤探针水分为{environment.soil_moisture_pct:.1f}%，"
-                f"高于本阶段{threshold['dynamic_trigger_moisture_pct']:.1f}%的灌溉触发线"
+                f"{relation}本阶段{threshold['dynamic_trigger_moisture_pct']:.1f}%的灌溉触发线，当前无需灌溉"
             )
         else:
             execution_status = "below_minimum"

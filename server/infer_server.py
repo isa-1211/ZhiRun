@@ -317,12 +317,36 @@ def decide(body):
     return result["decision"], result
 
 
-def assess_farm_condition(body):
-    """Return model readiness and safety status without a synthetic score.
+def _clamp(value, low=0.0, high=100.0):
+    return max(low, min(high, float(value)))
 
-    The model uses the real single-probe soil readings and current environment
-    to make irrigation/fertigation decisions. A weighted dashboard score was
-    removed because it could hide missing or invalid sensor inputs.
+
+def _band_score(value, ideal_low, ideal_high, hard_low, hard_high):
+    if value is None:
+        return None
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value) or value <= hard_low or value >= hard_high:
+        return 0.0
+    if ideal_low <= value <= ideal_high:
+        return 100.0
+    if value < ideal_low:
+        return _clamp(100.0 * (value - hard_low) / (ideal_low - hard_low))
+    return _clamp(100.0 * (hard_high - value) / (hard_high - ideal_high))
+
+
+def _level_score(level):
+    return {"low": 40.0, "medium": 100.0, "high": 75.0}.get(str(level), None)
+
+
+def assess_farm_condition(body):
+    """Return the farm overview score plus model readiness details.
+
+    The overall score remains available for the dashboard. The former five
+    score-component fields are intentionally kept internal and are not exposed
+    through this response.
     """
     request = dict(body or {})
     # Concentrations satisfy the model's work-order input contract; they do not
@@ -341,17 +365,34 @@ def assess_farm_condition(body):
     moisture = automatic.get("soil_moisture_pct")
     trigger_moisture = decision.get("dynamic_trigger_moisture_pct")
     target_moisture = decision.get("dynamic_target_moisture_pct")
-    if critical:
-        summary = "关键土壤数据缺失或异常，自动灌溉保持安全拦截。"
-    elif missing or invalid:
-        summary = "模型已接收可用土壤数据；部分非关键环境输入缺失或异常，仍可按安全规则决策。"
+    moisture_score = _band_score(moisture, float(trigger_moisture), float(target_moisture), 0.0, 100.0) if moisture is not None and trigger_moisture is not None and target_moisture is not None else None
+    ph_score = _band_score(automatic.get("soil_ph"), 6.0, 7.5, 5.0, 8.8)
+    nutrient_scores = [_level_score(decision.get(key)) for key in ("soil_n_level", "soil_p_level", "soil_k_level")]
+    nutrient_score = None if any(value is None for value in nutrient_scores) else sum(nutrient_scores) / len(nutrient_scores)
+    forecast = decision.get("predicted_environment") or {}
+    wind_score = _band_score(forecast.get("wind_max_m_s"), 0.0, 6.0, -0.1, 15.0)
+    temperature_score = _band_score(forecast.get("temperature_mean_c"), 12.0, 30.0, 5.0, 38.0)
+    weather_score = None if wind_score is None or temperature_score is None else wind_score * 0.55 + temperature_score * 0.45
+    confidence_score = 0.0 if critical else (55.0 if missing or invalid else 100.0)
+    score_values = (moisture_score, ph_score, nutrient_score, weather_score)
+    if critical or any(value is None for value in score_values):
+        score, rating = None, "数据不足"
+        summary = "关键土壤数据不可用于模型决策，评分显示为数据不足；自动灌溉保持安全拦截。"
     else:
-        summary = "现场土壤输入已接收，模型可按单个土壤探针和实时环境进行决策。"
+        score = round(sum(value * weight / 100 for value, weight in zip((*score_values, confidence_score), (45, 25, 15, 10, 5))))
+        if moisture_score <= 0:
+            score = min(score, 35)
+        elif moisture_score < 20:
+            score = min(score, 50)
+        rating = "良好" if score >= 85 else ("可控" if score >= 70 else ("需关注" if score >= 50 else "高风险"))
+        summary = "{}（{}分）：模型可按当前传感器和实时环境生成决策。".format(rating, score)
 
     return {
         "ok": True,
         "assessment_type": "model_readiness_v1",
         "generated_at": int(datetime.now().timestamp()),
+        "score": score,
+        "rating": rating,
         "summary": summary,
         "critical_inputs": critical,
         "missing_inputs": missing,

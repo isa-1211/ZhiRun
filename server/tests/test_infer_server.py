@@ -81,8 +81,8 @@ class FarmAssessmentTests(unittest.TestCase):
             infer_server.decide = original_decide
         self.assertEqual(assessment["assessment_type"], "model_readiness_v1")
         self.assertIn("安全拦截", assessment["summary"])
-        self.assertNotIn("score", assessment)
-        self.assertNotIn("rating", assessment)
+        self.assertIsNone(assessment["score"])
+        self.assertEqual(assessment["rating"], "数据不足")
         self.assertNotIn("components", assessment)
 
     def test_assessment_has_no_obsolete_score_fields(self):
@@ -97,8 +97,9 @@ class FarmAssessmentTests(unittest.TestCase):
             assessment = infer_server.assess_farm_condition({})
         finally:
             infer_server.decide = original_decide
-        for key in ("score", "rating", "components"):
-            self.assertNotIn(key, assessment)
+        self.assertIn("score", assessment)
+        self.assertIn("rating", assessment)
+        self.assertNotIn("components", assessment)
 
 
 if __name__ == "__main__":

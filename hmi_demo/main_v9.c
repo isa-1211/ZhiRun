@@ -446,11 +446,17 @@ static void model_set_execute_enabled(bool enabled) {
 static void model_input_event(lv_event_t *event) {
     if (!model_keyboard) return;
     lv_event_code_t code = lv_event_get_code(event);
-    if (code == LV_EVENT_FOCUSED) {
+    if (code == LV_EVENT_PRESSED || code == LV_EVENT_CLICKED || code == LV_EVENT_FOCUSED) {
         if (wifi_keyboard) lv_obj_add_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
         lv_keyboard_set_textarea(model_keyboard, lv_event_get_target(event));
+        lv_obj_move_foreground(model_keyboard);
         lv_obj_clear_flag(model_keyboard, LV_OBJ_FLAG_HIDDEN);
-    } else if (code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
+    }
+}
+
+static void model_keyboard_event(lv_event_t *event) {
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
         lv_obj_add_flag(model_keyboard, LV_OBJ_FLAG_HIDDEN);
     }
 }
@@ -1024,9 +1030,9 @@ static void build_dashboard(void) {
         lv_textarea_set_accepted_chars(model_inputs[index], "0123456789.");
         lv_textarea_set_max_length(model_inputs[index], 7);
         lv_textarea_set_text(model_inputs[index], concentration_defaults[index]);
+        lv_obj_add_event_cb(model_inputs[index], model_input_event, LV_EVENT_PRESSED, NULL);
+        lv_obj_add_event_cb(model_inputs[index], model_input_event, LV_EVENT_CLICKED, NULL);
         lv_obj_add_event_cb(model_inputs[index], model_input_event, LV_EVENT_FOCUSED, NULL);
-        lv_obj_add_event_cb(model_inputs[index], model_input_event, LV_EVENT_READY, NULL);
-        lv_obj_add_event_cb(model_inputs[index], model_input_event, LV_EVENT_CANCEL, NULL);
     }
     lv_obj_t *unit = lv_label_create(pages[3]);
     lv_label_set_text(unit, "g/L");
@@ -1119,6 +1125,8 @@ static void build_dashboard(void) {
     lv_obj_add_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
     model_keyboard = lv_keyboard_create(screen);
     lv_keyboard_set_mode(model_keyboard, LV_KEYBOARD_MODE_NUMBER);
+    lv_obj_add_event_cb(model_keyboard, model_keyboard_event, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(model_keyboard, model_keyboard_event, LV_EVENT_CANCEL, NULL);
     lv_obj_set_size(model_keyboard, 800, 180);
     lv_obj_set_pos(model_keyboard, 0, 300);
     lv_obj_add_flag(model_keyboard, LV_OBJ_FLAG_HIDDEN);

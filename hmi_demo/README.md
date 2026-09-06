@@ -6,6 +6,8 @@ important parts of the web frontend without running a browser:
 - air temperature and humidity, CO2, and light;
 - soil moisture, temperature, pH, nitrogen, phosphorus, and potassium;
 - wind speed and rainfall;
+- a touch-opened, scrollable two-day forecast dialog with temperature,
+  precipitation, wind, sunlight, UV, and reference ET0 details;
 - N/P/K dosing-pump and mixing-tank outlet-pump states;
 - server-side model work-order generation from live sensor/weather data;
 - editable N/P2O5/K2O solution concentrations, compact work-order review,

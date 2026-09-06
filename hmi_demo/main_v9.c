@@ -1,5 +1,6 @@
 #include <lvgl/lvgl.h>
 #include <lvgl/src/widgets/keyboard/lv_keyboard.h>
+#include <lvgl/src/widgets/msgbox/lv_msgbox.h>
 #include <lvgl/src/widgets/textarea/lv_textarea.h>
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -29,6 +30,10 @@ static lv_obj_t *source_label;
 static lv_obj_t *pump_label;
 static lv_obj_t *pages[5];
 static lv_obj_t *weather_label;
+static lv_obj_t *weather_forecast_button;
+static lv_obj_t *weather_popup;
+static char weather_forecast_detail[2800];
+static bool weather_forecast_available;
 static lv_obj_t *model_label;
 static lv_obj_t *model_inputs[3];
 static lv_obj_t *model_keyboard;
@@ -640,6 +645,129 @@ static void set_metric(unsigned index, bool available, double value,
     }
 }
 
+static bool json_day_number(const char *json, unsigned day, const char *field, double *number) {
+    char key[96];
+    snprintf(key, sizeof(key), "day%u_%s", day, field);
+    return json_number(json, key, number);
+}
+
+static bool json_day_string(const char *json, unsigned day, const char *field,
+                            char *out, size_t cap) {
+    char key[96];
+    snprintf(key, sizeof(key), "day%u_%s", day, field);
+    return json_string(json, key, out, cap);
+}
+
+static const char *weather_code_name(int code) {
+    if (code == 0) return "Clear sky";
+    if (code <= 3) return "Partly cloudy";
+    if (code == 45 || code == 48) return "Fog";
+    if (code >= 51 && code <= 57) return "Drizzle";
+    if (code >= 61 && code <= 67) return "Rain";
+    if (code >= 71 && code <= 77) return "Snow";
+    if (code >= 80 && code <= 82) return "Rain showers";
+    if (code >= 85 && code <= 86) return "Snow showers";
+    if (code >= 95) return "Thunderstorm";
+    return "Unknown";
+}
+
+static const char *clock_part(const char *iso_time) {
+    const char *separator = strchr(iso_time, 'T');
+    return separator ? separator + 1 : iso_time;
+}
+
+static void update_two_day_forecast(const char *json) {
+    weather_forecast_detail[0] = 0;
+    size_t used = 0;
+    unsigned valid_days = 0;
+    for (unsigned day = 1; day <= 2; day++) {
+        char date[24] = "--", sunrise[32] = "--", sunset[32] = "--";
+        if (!json_day_string(json, day, "time", date, sizeof(date))) continue;
+        json_day_string(json, day, "sunrise", sunrise, sizeof(sunrise));
+        json_day_string(json, day, "sunset", sunset, sizeof(sunset));
+        double code = -1, temp_max = 0, temp_min = 0, apparent_max = 0, apparent_min = 0;
+        double precipitation = 0, rain = 0, showers = 0, snowfall = 0;
+        double probability = 0, precipitation_hours = 0, wind = 0, gust = 0, direction = 0;
+        double daylight = 0, sunshine = 0, uv = 0, uv_clear = 0, radiation = 0, et0 = 0;
+        json_day_number(json, day, "weather_code", &code);
+        json_day_number(json, day, "temperature_2m_max", &temp_max);
+        json_day_number(json, day, "temperature_2m_min", &temp_min);
+        json_day_number(json, day, "apparent_temperature_max", &apparent_max);
+        json_day_number(json, day, "apparent_temperature_min", &apparent_min);
+        json_day_number(json, day, "precipitation_sum", &precipitation);
+        json_day_number(json, day, "rain_sum", &rain);
+        json_day_number(json, day, "showers_sum", &showers);
+        json_day_number(json, day, "snowfall_sum", &snowfall);
+        json_day_number(json, day, "precipitation_probability_max", &probability);
+        json_day_number(json, day, "precipitation_hours", &precipitation_hours);
+        json_day_number(json, day, "wind_speed_10m_max", &wind);
+        json_day_number(json, day, "wind_gusts_10m_max", &gust);
+        json_day_number(json, day, "wind_direction_10m_dominant", &direction);
+        json_day_number(json, day, "daylight_duration", &daylight);
+        json_day_number(json, day, "sunshine_duration", &sunshine);
+        json_day_number(json, day, "uv_index_max", &uv);
+        json_day_number(json, day, "uv_index_clear_sky_max", &uv_clear);
+        json_day_number(json, day, "shortwave_radiation_sum", &radiation);
+        json_day_number(json, day, "et0_fao_evapotranspiration", &et0);
+
+        int written = snprintf(weather_forecast_detail + used,
+                               sizeof(weather_forecast_detail) - used,
+            "%s - %s\n"
+            "Condition: %s (WMO %.0f)\n"
+            "Temperature: %.1f to %.1f C\n"
+            "Feels like: %.1f to %.1f C\n"
+            "Precipitation: %.1f mm | probability %.0f%% | %.1f h\n"
+            "Rain %.1f mm | showers %.1f mm | snow %.1f cm\n"
+            "Wind: max %.1f km/h | gust %.1f km/h | direction %.0f deg\n"
+            "Sunrise %s | sunset %s\n"
+            "Daylight %.1f h | sunshine %.1f h\n"
+            "UV max %.1f | clear-sky %.1f\n"
+            "Solar radiation %.2f MJ/m2 | ET0 %.2f mm\n%s",
+            day == 1 ? "Tomorrow" : "Following day", date,
+            weather_code_name((int)code), code, temp_min, temp_max,
+            apparent_min, apparent_max, precipitation, probability, precipitation_hours,
+            rain, showers, snowfall, wind, gust, direction,
+            clock_part(sunrise), clock_part(sunset), daylight / 3600.0, sunshine / 3600.0,
+            uv, uv_clear, radiation, et0, day == 1 ? "\n" : "");
+        if (written < 0 || (size_t)written >= sizeof(weather_forecast_detail) - used) break;
+        used += (size_t)written;
+        valid_days++;
+    }
+    weather_forecast_available = valid_days == 2;
+    if (weather_forecast_button) {
+        if (weather_forecast_available) lv_obj_clear_state(weather_forecast_button, LV_STATE_DISABLED);
+        else lv_obj_add_state(weather_forecast_button, LV_STATE_DISABLED);
+    }
+}
+
+static void weather_popup_deleted(lv_event_t *event) {
+    (void)event;
+    weather_popup = NULL;
+}
+
+static void show_weather_forecast(lv_event_t *event) {
+    (void)event;
+    if (!weather_forecast_available) return;
+    if (weather_popup) {
+        lv_obj_move_foreground(weather_popup);
+        return;
+    }
+    weather_popup = lv_msgbox_create(NULL);
+    lv_obj_set_size(weather_popup, 740, 420);
+    lv_obj_center(weather_popup);
+    lv_obj_set_style_bg_color(weather_popup, lv_color_hex(0x101925), 0);
+    lv_obj_set_style_border_color(weather_popup, lv_color_hex(0x58D3AE), 0);
+    lv_obj_add_event_cb(weather_popup, weather_popup_deleted, LV_EVENT_DELETE, NULL);
+    lv_msgbox_add_title(weather_popup, "Next two days - detailed forecast");
+    lv_msgbox_add_close_button(weather_popup);
+    lv_obj_t *text = lv_msgbox_add_text(weather_popup, weather_forecast_detail);
+    lv_obj_set_style_text_color(text, lv_color_hex(0xDCE6F4), 0);
+    lv_obj_set_style_text_line_space(text, 5, 0);
+    lv_obj_t *content = lv_msgbox_get_content(weather_popup);
+    lv_obj_add_flag(content, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(content, LV_DIR_VER);
+}
+
 static void update_weather_page(const char *json) {
     if (!weather_label || !json) return;
     static const char *keys[] = {
@@ -690,6 +818,7 @@ static void update_weather_page(const char *json) {
         snprintf(text, sizeof(text), "Weather API unavailable\nUsing local sensor data below\nAir temp %.1f C\nAir humidity %.1f %%\nWind %.1f m/s\nRain %.1f mm",
                  0.0, 0.0, 0.0, 0.0);
     lv_label_set_text(weather_label, text);
+    update_two_day_forecast(json);
 }
 
 static void refresh(lv_timer_t *timer) {
@@ -739,7 +868,7 @@ static void refresh(lv_timer_t *timer) {
     fprintf(stderr, "HMI_REFRESH source_updated\n");
 
     char weather_response[4096];
-    if (request("GET", "/weather", NULL, weather_response, sizeof(weather_response)) == 0)
+    if (request("GET", "/weather?compact=2d", NULL, weather_response, sizeof(weather_response)) == 0)
         update_weather_page(weather_response);
     else if (weather_label) {
         char weather_text[220];
@@ -1014,7 +1143,18 @@ static void build_dashboard(void) {
 
     valve_action_label = page_text(pages[2], "Ready", 7, 311, 733);
     valve_detail_label = page_text(pages[2], "Waiting for valve status", 7, 337, 733);
-    weather_label = page_text(pages[1], "Waiting for environment data", 7, 7, 740);
+    lv_obj_t *weather_heading = page_text(pages[1], "Current conditions", 7, 15, 320);
+    lv_obj_set_style_text_color(weather_heading, lv_color_hex(0x58D3AE), 0);
+    weather_forecast_button = lv_btn_create(pages[1]);
+    lv_obj_set_pos(weather_forecast_button, 505, 5);
+    lv_obj_set_size(weather_forecast_button, 235, 40);
+    lv_obj_add_flag(weather_forecast_button, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_add_state(weather_forecast_button, LV_STATE_DISABLED);
+    lv_obj_add_event_cb(weather_forecast_button, show_weather_forecast, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *weather_forecast_button_label = lv_label_create(weather_forecast_button);
+    lv_label_set_text(weather_forecast_button_label, "NEXT 2 DAYS DETAILS");
+    lv_obj_center(weather_forecast_button_label);
+    weather_label = page_text(pages[1], "Waiting for environment data", 7, 56, 740);
     static const char *concentration_names[] = {"N", "P2O5", "K2O"};
     static const char *concentration_defaults[] = {"100", "80", "120"};
     for (unsigned index = 0; index < 3; index++) {

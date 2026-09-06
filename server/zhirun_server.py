@@ -246,6 +246,31 @@ def compact_board_prediction(payload):
     return compact
 
 
+def compact_board_weather(payload):
+    """Return current conditions plus the next two full daily forecasts."""
+    if not isinstance(payload, dict):
+        return {"ok": False}
+    compact = {
+        "ok": bool(payload.get("ok")),
+        "latitude": payload.get("latitude"),
+        "longitude": payload.get("longitude"),
+        "timezone": payload.get("timezone"),
+        "location_source": payload.get("location_source"),
+        "updated_at": payload.get("updated_at"),
+    }
+    current = payload.get("current") if isinstance(payload.get("current"), dict) else {}
+    compact.update(current)
+    daily = payload.get("daily") if isinstance(payload.get("daily"), dict) else {}
+    # Open-Meteo includes today at index 0. "Next two days" means tomorrow
+    # and the following day, so expose indices 1 and 2 as scalar fields that
+    # the small native HMI can parse without a general JSON library.
+    for day_number, source_index in enumerate((1, 2), start=1):
+        for key, values in daily.items():
+            if isinstance(values, list) and len(values) > source_index:
+                compact[f"day{day_number}_{key}"] = values[source_index]
+    return compact
+
+
 def safe_device_id(value):
     value = str(value or "").strip()
     if not value:
@@ -1028,6 +1053,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 forecast = weather_forecast(latitude, longitude)
                 forecast["location_source"] = location_source
+                if query.get("compact", [""])[0] == "2d":
+                    forecast = compact_board_weather(forecast)
                 self.send_json(200, forecast)
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 self.send_json(502, {"ok": False, "reason": "weather_unavailable", "message": str(exc)})

@@ -61,6 +61,25 @@ class FertigationModelTests(unittest.TestCase):
         self.assertEqual(weather["wind_speed_m_s"], 4.5)
         self.assertEqual(weather["weather_forecast"][0]["wind_speed_m_s"], 5.2)
 
+    def test_two_day_summary_excludes_observation_day(self):
+        environment = EnvironmentInput(
+            observation_time="2026-09-07T10:19:17+08:00",
+            weather_forecast=[
+                {"date": "2026-09-07", "rain_mm": 6.1, "eto_mm": 1.6,
+                 "tmax_c": 19, "tmin_c": 13, "wind_speed_m_s": 4.0},
+                {"date": "2026-09-08", "rain_mm": 0.8, "eto_mm": 2.9,
+                 "tmax_c": 20, "tmin_c": 12, "wind_speed_m_s": 4.5},
+                {"date": "2026-09-09", "rain_mm": 0.0, "eto_mm": 4.4,
+                 "tmax_c": 22, "tmin_c": 11, "wind_speed_m_s": 5.0},
+            ],
+        )
+
+        summary = environment.forecast_summary(horizon_days=2)
+
+        self.assertAlmostEqual(summary["rain_next_2d_mm"], 0.8)
+        self.assertEqual(summary["forecast_records_used"], 2)
+        self.assertEqual(summary["temperature_max_c"], 22.0)
+
     def test_only_manual_fields_are_concentrations_and_are_used_for_dose_volume(self):
         result = FertigationModel(use_ml=False).plan(200, 100, 50, dry_environment())
         self.assertTrue(result["job"]["doses"])

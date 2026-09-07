@@ -148,6 +148,8 @@ def queue_farm_assessment(device_id, latest):
         _farm_assessment_cache[device_id] = {**cached, "inflight": True}
 
     payload = dict(latest)
+    payload.setdefault("latitude", WEATHER_FALLBACK_LATITUDE)
+    payload.setdefault("longitude", WEATHER_FALLBACK_LONGITUDE)
     payload.update({
         "n_concentration_g_l": AUTO_MODEL_N_CONCENTRATION,
         "p_concentration_g_l": AUTO_MODEL_P_CONCENTRATION,
@@ -343,6 +345,8 @@ def _auto_model_once():
         device_id = current_device_id()
         latest = dict(_latest_by_device.get(device_id, {})) if device_id else {}
     payload = dict(latest)
+    payload.setdefault("latitude", WEATHER_FALLBACK_LATITUDE)
+    payload.setdefault("longitude", WEATHER_FALLBACK_LONGITUDE)
     payload.update({
         "n_concentration_g_l": AUTO_MODEL_N_CONCENTRATION,
         "p_concentration_g_l": AUTO_MODEL_P_CONCENTRATION,
@@ -1184,6 +1188,8 @@ class Handler(BaseHTTPRequestHandler):
             with _lock:
                 device_id = current_device_id(obj.get("device_id"))
                 model_input = dict(_latest_by_device.get(device_id, {})) if device_id else {}
+            model_input.setdefault("latitude", WEATHER_FALLBACK_LATITUDE)
+            model_input.setdefault("longitude", WEATHER_FALLBACK_LONGITUDE)
             model_input.update(obj)
             compact = parse_qs(parsed.query).get("compact", [""])[0] == "1"
             self.proxy_fertigation("/predict", model_input, compact=compact)

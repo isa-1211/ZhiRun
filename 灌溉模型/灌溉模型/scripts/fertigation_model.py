@@ -58,6 +58,34 @@ def _nonnegative(value: Any, name: str) -> float:
     return result
 
 
+def _forecast_date(value: Any) -> Any:
+    """Return the calendar date carried by a forecast timestamp."""
+    if value is None:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _future_forecast_records(records: Any, observation_time: Any,
+                             horizon_days: int) -> list[Mapping[str, Any]]:
+    """Select full forecast days after the observation day when dates exist."""
+    available = [item for item in records if isinstance(item, Mapping)]
+    horizon = max(1, int(horizon_days))
+    observation_date = _forecast_date(observation_time)
+    if observation_date is not None:
+        future = [
+            item for item in available
+            if (_forecast_date(item.get("date", item.get("time"))) or observation_date)
+            > observation_date
+        ]
+        if future:
+            return future[:horizon]
+    # Preserve compatibility with undated records and single-day safety data.
+    return available[:horizon]
+
+
 @dataclass(frozen=True)
 class FertilizerConcentrations:
     """三路母液中目标养分浓度，单位 g/L。
@@ -178,7 +206,7 @@ class EnvironmentInput:
         ``eto_forecast_mm`` fallbacks.
         """
         horizon = max(1, int(horizon_days))
-        records = [item for item in self.weather_forecast[:horizon] if isinstance(item, Mapping)]
+        records = _future_forecast_records(self.weather_forecast, self.observation_time, horizon)
 
         def values(*names: str) -> list[float]:
             result: list[float] = []
@@ -286,14 +314,30 @@ class EnvironmentInput:
             rain_values = forecast.get("precipitation_sum", forecast.get("rain_mm", []))
             eto_values = forecast.get("et0_fao_evapotranspiration", forecast.get("eto_mm", []))
             if isinstance(rain_values, (list, tuple)) and rain_values:
-                raw.setdefault("rain_forecast_mm", float(rain_values[0] or 0))
-                raw.setdefault("rain_next_2d_mm", float(sum(float(x or 0) for x in rain_values[:2])))
+                dates = list(forecast.get("time", forecast.get("date", [])))
+                observation_date = _forecast_date(raw.get("observation_time"))
+                indices = [
+                    index for index, value in enumerate(dates)
+                    if index < len(rain_values) and observation_date is not None
+                    and (_forecast_date(value) or observation_date) > observation_date
+                ][:2]
+                if not indices:
+                    indices = list(range(min(2, len(rain_values))))
+                raw.setdefault("rain_forecast_mm", float(rain_values[indices[0]] or 0))
+                raw.setdefault(
+                    "rain_next_2d_mm",
+                    float(sum(float(rain_values[index] or 0) for index in indices)),
+                )
             if isinstance(eto_values, (list, tuple)) and eto_values:
-                raw.setdefault("eto_forecast_mm", float(eto_values[0] or 0))
+                eto_index = indices[0] if indices and indices[0] < len(eto_values) else 0
+                raw.setdefault("eto_forecast_mm", float(eto_values[eto_index] or 0))
         elif isinstance(forecast, (list, tuple)) and forecast:
+            forecast_records = _future_forecast_records(
+                forecast, raw.get("observation_time"), 2,
+            )
             rain_values = [float(item.get("rain_mm", item.get("precipitation_mm", 0)) or 0)
-                           for item in forecast if isinstance(item, Mapping)]
-            eto_values = [float(item.get("eto_mm", 0) or 0) for item in forecast if isinstance(item, Mapping)]
+                           for item in forecast_records]
+            eto_values = [float(item.get("eto_mm", 0) or 0) for item in forecast_records]
             if rain_values:
                 raw.setdefault("rain_forecast_mm", rain_values[0])
                 raw.setdefault("rain_next_2d_mm", sum(rain_values[:2]))

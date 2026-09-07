@@ -37,10 +37,15 @@ def main():
     sftp.put(str(PROJECT / "server" / "zhirun_server.py"), "/tmp/zhirun_server.py.new")
     sftp.put(str(PROJECT / "server" / "infer_server.py"), "/tmp/zhirun_infer_server.py.new")
     sftp.put(str(PROJECT / "server" / "index.html"), "/tmp/zhirun_index.html.new")
+    sftp.put(
+        str(PROJECT / "灌溉模型" / "灌溉模型" / "scripts" / "fertigation_model.py"),
+        "/tmp/zhirun_fertigation_model.py.new",
+    )
     sftp.close()
 
     run(client, "/opt/zhirun/.venv/bin/python -m py_compile /tmp/zhirun_server.py.new")
     run(client, "/opt/zhirun/.venv/bin/python -m py_compile /tmp/zhirun_infer_server.py.new")
+    run(client, "/opt/zhirun/.venv/bin/python -m py_compile /tmp/zhirun_fertigation_model.py.new")
     run(
         client,
         "test -e /opt/zhirun/server/zhirun_server.py.pre-rk3506 || "
@@ -53,6 +58,7 @@ def main():
         "install -o zhirun -g zhirun -m 0644 /tmp/zhirun_server.py.new /opt/zhirun/server/zhirun_server.py; "
         "install -o zhirun -g zhirun -m 0644 /tmp/zhirun_infer_server.py.new /opt/zhirun/server/infer_server.py; "
         "install -o zhirun -g zhirun -m 0644 /tmp/zhirun_index.html.new /opt/zhirun/server/index.html; "
+        "install -m 0644 /tmp/zhirun_fertigation_model.py.new '/opt/zhirun/灌溉模型/灌溉模型/scripts/fertigation_model.py'; "
         "systemctl restart zhirun-infer.service zhirun-server.service; sleep 8; "
         "systemctl is-active zhirun-infer.service; "
         "systemctl is-active zhirun-server.service; "

@@ -17,6 +17,8 @@
       var(--bg);
     color:var(--ink);margin:0;padding:0;box-sizing:border-box;height:100vh;display:flex;flex-direction:column;overflow:hidden;
     -webkit-font-smoothing:antialiased}
+  /* The computer dashboard is farm mode only; legacy panels remain hidden data containers. */
+  body>.top,body>.wrap{display:none!important}
   *{box-sizing:border-box}
   ::-webkit-scrollbar{width:9px;height:9px}
   ::-webkit-scrollbar-thumb{background:#26344a;border-radius:6px;border:2px solid transparent;background-clip:padding-box}

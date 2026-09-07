@@ -541,7 +541,7 @@ function cropModalBackdrop(event){if(event.target===$('cropSettings'))closeCropD
 function saveCropDialog(){const input=$('cropInput'),crop=String(input?.value||'').trim(),supported=['玉米','马铃薯','甜菜','向日葵'],status=$('cropSettingsOut');if(!crop){status.textContent='请输入种植作物';input?.focus();return;}if(!supported.includes(crop)){status.textContent='当前模型暂支持：'+supported.join('、');input?.focus();return;}syncCropSelection(crop,true);closeCropDialog();}
 function syncCropSelection(value,notify=true){const crop=value||localStorage.getItem('zhirun-crop')||'玉米';['modelCrop','farmCrop'].forEach(id=>{const el=$(id);if(el){el.value=crop;el.onchange=()=>syncCropSelection(el.value,true);}});localStorage.setItem('zhirun-crop',crop);if($('modelCropLabel'))$('modelCropLabel').textContent='作物：'+crop;if($('modelDate'))$('modelDate').textContent=currentDecisionDate();if(notify&&value){fetchTO('/fertigation/auto/crop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({crop})},8000).catch(()=>{});}}
  function arrangeFarmPanels(){const left=document.querySelector('.farm-left'),right=document.querySelector('.farm-right'),weather=document.querySelector('.farm-weather'),device=document.querySelector('.farm-device');if(left&&right&&weather&&weather.parentElement!==left)left.appendChild(weather);if(left&&right&&device&&device.parentElement!==right)right.insertBefore(device,right.firstElementChild);}
-function setViewMode(mode){const farm=mode==='farm',recordButton=$('recordBtn'),recordTarget=$(farm?'farmHeaderActions':'classicHeaderActions');document.body.classList.toggle('farm-mode',farm);if(recordButton&&recordTarget)recordTarget.prepend(recordButton);localStorage.setItem('zhirun-view',mode);if(farm){arrangeFarmPanels();renderFarm(lastData);loadValve();loadWeather();}}
+function setViewMode(){const recordButton=$('recordBtn'),recordTarget=$('farmHeaderActions');document.body.classList.add('farm-mode');if(recordButton&&recordTarget)recordTarget.prepend(recordButton);localStorage.setItem('zhirun-view','farm');arrangeFarmPanels();renderFarm(lastData);loadValve();loadWeather();}
  function openFarmNetwork(){toggleFarmWifi();}
  function toggleFarmWifi(event){if(event)event.stopPropagation();const panel=$('farmWifiPanel');if(!panel)return;const open=panel.classList.toggle('open');if(open){renderFarmWifiCurrent();renderFarmWifiNetworks(valveCfg.wifiNetworks||[]);scanFarmWifi(true);const hotspot=$('farmHotspotToggle');if(hotspot&&!hotspot.classList.contains('on'))hotspot.textContent='OFF';}}
  document.addEventListener('click',event=>{const panel=$('farmWifiPanel');if(panel&&panel.classList.contains('open')&&!event.target.closest('.farm-wifi-wrap'))panel.classList.remove('open');});
@@ -1045,7 +1045,7 @@ async function outletTest(act){
 }
 // ---- 面板3: 模型 (实时数据 -> 水肥策略服务) ----
 let modelData={};
-window.ZHIRUN_UI_BUILD='20260907-crop-date-v1';
+window.ZHIRUN_UI_BUILD='20260907-farm-only-v1';
 function modelNumber(value,digits=1){const number=Number(value);return Number.isFinite(number)?number.toFixed(digits):'--';}
 function syncModelSensor(){
   const values={modelSoilMoist:['soilMoist',1],modelSoilTemp:['soilTemp',1],modelSoilPh:['soilPH',1],modelN:['n',0],modelP:['p',0],modelK:['k',0],modelRain:['rainMm',1],modelAirTemp:['airTemp',1],modelAirHum:['airHum',1],modelWind:['windSpeed',1],modelLux:['lux',0]};

@@ -213,6 +213,8 @@ def build():
     doc.add_heading("2. Materials and methods", level=1)
     doc.add_heading("2.1. System architecture", level=2)
     add_para(doc, "The system follows a browser-server-edge-actuator chain: a browser communicates with the public server; the server exchanges data with the RK3506B over Wi-Fi or Ethernet; the RK3506B reads RS485/Modbus sensors and forwards commands over a USB/CH341 serial link; and the ESP32-S3 drives four relay inputs. The architecture deliberately keeps model inference on the server and keeps the edge node lightweight. The local LVGL display uses the same state fields as the web interface, allowing an operator to inspect sensor values and pump states without opening the browser.")
+    add_para(doc, "A normal data cycle begins with a timestamped sensor snapshot at the edge. The collector validates register values, normalizes units and publishes the snapshot to the server. The server stores the latest snapshot, enriches it with date-derived crop stage and weather features, and returns a decision object containing targets, alerts, data-quality flags and an explanatory status. A work order is not equivalent to a relay command: the operator must review the proposed water and nutrient targets and issue an explicit execute request. The server then forwards a bounded command to the RK3506B, which relays it to the ESP32-S3. Status messages travel in the reverse direction and include state, cumulative pulse totals, active outputs, elapsed time and faults. This separation allows the interface to remain informative when the actuator is offline and allows the actuator to stop safely when the server is unreachable.")
+    add_para(doc, "The communication design also accommodates the user's observed network conditions. Wi-Fi is retried after link loss, Ethernet and Wi-Fi are treated as alternative uplinks, and the edge software does not rely on a fixed USB insertion order. The paper treats these features as availability mechanisms rather than as agronomic innovations. Their purpose is to keep the sensing and command path recoverable while ensuring that reconnect logic cannot silently restart a previous pump command.")
     add_para(doc, "[Figure 1 near here]")
 
     doc.add_heading("2.2. Sensors, inputs and actuation", level=2)
@@ -231,6 +233,8 @@ def build():
     doc.add_heading("2.3. Teacher policy and crop calendar", level=2)
     add_para(doc, "The model is a policy-reproduction model rather than a yield model. The teacher policy is deterministic and combines a measured soil-moisture trigger, crop-stage nutrient budgets, crop coefficients, recent evapotranspiration and rain, and safety constraints. Four crop calendars are currently configured: potato, sugar beet, maize and sunflower. The date is converted to day of year, and the active growth stage is selected from crop-specific intervals. The teacher outputs four targets per mu: irrigation water (m3 per mu), nitrogen (kg per mu), P2O5 (kg per mu) and K2O (kg per mu). Here, mu denotes the local Chinese land unit of 666.67 m2.")
     add_para(doc, "The weather features include daily mean, maximum and minimum temperature, relative humidity, wind, radiation, current rain, two-day forecast rain, seven-day rain, ET0, seven-day ET0, growing degree accumulation and dry days. ET0 is calculated using the FAO-56 Penman-Monteith formulation. Rain and wind are used both as model features and as operational safety signals. The teacher adjusts the moisture trigger within bounded limits under forecast rain or high evaporative demand, but it never overrides a hard safety block.")
+    add_para(doc, "For a valid soil snapshot, the water deficit is computed from the difference between the measured probe moisture and the stage trigger/target pair. The implementation converts this percentage deficit through a stage-specific effective depth and an application-efficiency factor, then clips the result at the configured maximum single-event volume. In simplified form, moisture deficit is max(0, target - measured moisture) multiplied by effective depth and converted to millimetres; gross application is the larger of this deficit and the ET-driven need divided by application efficiency; and the final water target is gross application multiplied by the local mu conversion and bounded by the single-event limit. Fertilizer targets are calculated from the remaining stage budgets and the soil nutrient level factors low = 1.0, medium = 0.65 and high = 0.0. Fertilization is due only when irrigation is positive, the interval since the previous event is ready, and the EC safety gate is open. The maximum per-event nutrient rates are 2.5 kg mu-1 for N, 1.5 kg mu-1 for P2O5 and 3.0 kg mu-1 for K2O.")
+    add_para(doc, "This explicit teacher formulation is important for interpretation. ExtraTrees is not discovering a causal crop response from harvest labels; it is approximating a constrained decision surface. The model can smooth nonlinear interactions between crop, stage, weather and sensor context, but it cannot correct a biased teacher policy. The architecture therefore exposes the teacher assumptions and retains them as auditable configuration rather than hiding them in an opaque end-to-end neural model.")
 
     doc.add_heading("2.4. ExtraTrees policy distillation", level=2)
     add_para(doc, "A training sample is formed by combining a weather day, a crop and stage, one soil profile, and two reproducible single-probe scenarios. The generated dataset contains 39,600 rows. Categorical features are crop, stage and three nutrient-level categories; numerical features cover weather, soil, crop-stage budgets, geography and sensor context. The data are split chronologically to test temporal transfer: 2015-2022 for training, 2023 for validation, and 2024-2025 for independent testing. This split prevents random mixing of adjacent days across train and test.")
@@ -241,10 +245,16 @@ def build():
 
     doc.add_heading("2.6. Flow-meter-closed-loop execution", level=2)
     add_para(doc, "The ESP32-S3 maps relay inputs to N, P, K and the mixing-tank outlet pump. Each fertilizer pump is associated with one pulse flow meter. During a work order, pulse totals are converted to litres using a configurable pulses-per-litre calibration. When a channel reaches its target volume, only that channel is stopped. The outlet pump is inhibited while any fertilizer channel is active and is enabled only after all three channels report completion. A no-flow timeout, actuator fault, stale command or manual STOP ALL command de-energizes all four relays. Each channel also has a maximum run-time bound. These rules are implemented in the controller state machine and exposed through status feedback to the server and dashboard.")
+    add_para(doc, "The flow-meter closure is evaluated against a baseline captured when the controller starts, rather than against an absolute lifetime counter. This prevents historical pulses from satisfying a new work order. The controller accepts either line identifiers or nutrient identifiers in a sensor frame, which permits the RK3506B adapter to preserve the physical A/B/C wiring names while the server reports the agronomic N/P/K names. The default calibration is 450 pulses per litre, but the configuration explicitly warns that every meter must be calibrated with a measured container. In a production experiment, calibration error should be reported as a dose uncertainty and not silently absorbed into the machine-learning error.")
     add_para(doc, "[Figure 2 near here]")
 
     doc.add_heading("2.7. Evaluation protocol", level=2)
     add_para(doc, "Evaluation uses the stored model metrics JSON and the generated policy sample file. The independent test set contains 7,200 rows from 2024-2025. Continuous predictions are evaluated with MAE, RMSE and R2. The controller logic is evaluated by deterministic simulations and unit tests for independent channel stopping, outlet-pump interlocking, no-flow timeout and stop-all behavior. Because the current project does not yet contain paired local treatment-yield observations, no claim is made about yield, water productivity, fertilizer recovery or economic return.")
+    add_para(doc, "For each continuous target, MAE measures the average absolute deviation in the native target unit, RMSE emphasizes larger deviations, and R2 measures variance explained relative to the test-set mean. The binary irrigation decision threshold is 0.5 m3 mu-1, chosen to separate a zero/hold decision from a positive irrigation recommendation in the teacher policy. The baseline comparison uses exactly the same rows and target units as the fitted model. No random resampling or test-time tuning is applied. Reported values are rounded to four decimal places only after calculation.")
+    doc.add_heading("2.8. Data quality and reproducibility", level=2)
+    add_para(doc, "The weather file is parsed by date, sentinel values are converted to missing values, and gaps of up to three days are linearly interpolated before feature construction. The sample generator fixes the NumPy random seed at 42. Soil scenarios are bounded to 2-95% during generation, while runtime validation accepts only a measured moisture value in the physical 0-100% range. All feature names, target names, split years, model hyperparameters and metric calculations are stored in the training script and the model metrics JSON. This makes the reported numbers reproducible from the repository without access to the live farm device.")
+    doc.add_heading("2.9. Baselines and robustness analysis", level=2)
+    add_para(doc, "Two simple baselines were calculated on the same independent test set. The zero-output baseline always returns zero water and nutrients, representing a controller that never irrigates. The training-mean baseline returns the mean target vector calculated from 2015-2022. These baselines are intentionally weak but provide a transparent reference for policy reproduction. We additionally report performance separately for 2024 and 2025 and separately for each crop to expose temporal and crop-specific variation rather than hiding it in one aggregate score.")
 
     doc.add_heading("3. Results", level=1)
     doc.add_heading("3.1. Dataset and held-out policy performance", level=2)
@@ -259,12 +269,15 @@ def build():
     ]
     add_para(doc, "[Table 2 near here]")
     add_para(doc, "The water target achieved an R2 of 0.9805 and the nutrient targets achieved R2 values between 0.9230 and 0.9576. The binary irrigation decision accuracy was 0.9317. These scores indicate that the fitted model reproduces the generated teacher decisions well over the held-out years. They should not be interpreted as sensor-to-yield accuracy or as evidence that the teacher policy is agronomically optimal.")
+    add_para(doc, "The error scale is also informative. The water MAE of 0.4599 m3 mu-1 is small relative to the 25 m3 mu-1 maximum event configured in the teacher, whereas the nutrient MAEs are 0.0249, 0.0148 and 0.0123 kg mu-1 for N, P2O5 and K2O. Because most nutrient rows are zero, these aggregate errors should be read together with the non-zero rates in Table 4. A model can obtain a low average nutrient MAE by predicting zero too often; the decision comparison and the baseline table reduce this ambiguity but do not replace precision-recall analysis on positive fertigation events. That analysis is reserved for the future field-labeled dataset.")
 
     doc.add_heading("3.2. Runtime behavior under incomplete context", level=2)
     add_para(doc, "The runtime path preserves operation when non-critical environmental context is unavailable. For example, missing wind or forecast values can be replaced by a regional cached weather record and marked in the decision explanation. In contrast, missing or invalid soil moisture, pH or measured N/P/K holds automatic irrigation. This asymmetric policy prevents a visually complete but soil-unsupported decision. The generated work order remains a reviewable recommendation until the operator presses the explicit execution action.")
+    add_para(doc, "The distinction between a recommendation and an execution command is visible in the state machine. A newly inferred result is represented as a proposed work order with target volumes and reasons. Only an explicit execute action changes the controller from IDLE to DOSING or OUTLET_TRANSFER. If the board is offline, the server retains the recommendation and reports the communication state; it does not infer successful physical delivery from a successful HTTP response. Conversely, a relay status without flow pulses is classified as a fault rather than as completed fertigation. These semantics are designed to avoid the common dashboard failure mode in which a green button is mistaken for delivered water or nutrient.")
 
     doc.add_heading("3.3. Actuation and interlock behavior", level=2)
     add_para(doc, "Controller simulations and unit tests confirm four safety properties. First, each fertilizer channel can stop independently when its own flow-meter target is met. Second, a completed N channel does not stop P or K prematurely. Third, the outlet pump cannot start while a fertilizer relay remains active. Fourth, no-flow timeout, stale command or stop-all transitions all set the four relay outputs to OFF. This provides a deterministic boundary between a server recommendation and physical actuation.")
+    add_para(doc, "The controller trace in Table 7 illustrates why this logic matters even for a small work order. The N/P/K target volumes are different because each channel has a different nutrient target and concentration. A single shared timer would either under-dose one channel or overrun another. Independent pulse totals allow the channels to finish at different times, while the outlet interlock guarantees that the mixing-tank pump starts only after the fertilizer phase has ended. The trace is intentionally small enough to reproduce on a bench without running a full field pump.")
     table3_headers = ["Condition", "Required response", "Reason"]
     table3_rows = [
         ["Critical soil field absent or invalid", "Hold automatic irrigation", "Avoid decisions without direct soil evidence"],
@@ -274,6 +287,56 @@ def build():
         ["Manual STOP ALL or stale command", "Turn all four relays OFF", "Provide immediate physical fail-safe"],
     ]
     add_para(doc, "[Table 3 near here]")
+
+    doc.add_heading("3.4. Dataset composition and target sparsity", level=2)
+    add_para(doc, "The generated dataset contains 39,600 rows across 11 calendar years, with 3,600 rows per year. Crop representation is slightly unbalanced because the configured calendars have different numbers of active days: sugar beet contributes 10,560 rows, maize 10,164, sunflower 9,768 and potato 9,108. Twelve stage labels are represented across the four crops, with the seedling stage contributing 11,946 rows and maturity and filling stages contributing the remainder. Only 33.95% of rows have a non-zero water target, which means that a controller that always irrigates would be operationally unsafe even if its average volume appeared plausible. Non-zero N, P2O5 and K2O targets occur in 8.90%, 6.96% and 5.08% of rows, respectively. The target distributions are therefore sparse and strongly right-skewed.")
+    table4_headers = ["Variable", "Mean", "Standard deviation", "Non-zero rate"]
+    table4_rows = [
+        ["Water (m3 mu-1)", "8.3166", "11.6524", "33.95%"],
+        ["N (kg mu-1)", "0.1263", "0.4690", "8.90%"],
+        ["P2O5 (kg mu-1)", "0.0696", "0.2836", "6.96%"],
+        ["K2O (kg mu-1)", "0.0635", "0.3437", "5.08%"],
+        ["Single-probe moisture (%)", "42.1001", "15.2287", "100%"],
+        ["Two-day rain forecast (mm)", "5.0114", "9.3350", "100%"],
+        ["ET0 (mm d-1)", "4.6361", "1.4941", "100%"],
+    ]
+    add_para(doc, "[Table 4 near here]")
+
+    doc.add_heading("3.5. Temporal and crop-level generalization", level=2)
+    add_para(doc, "The two independent test years show a modest but measurable temporal change. Water R2 decreases from 0.9829 in 2024 to 0.9778 in 2025, while irrigation decision accuracy decreases from 0.9517 to 0.9117. The nutrient R2 values remain above 0.90 in both years, but K2O is more sensitive to the later-year distribution than water. At crop level, water decision accuracy ranges from 0.9239 for potato to 0.9375 for sugar beet. These differences are not large enough to support crop-specific claims of superiority, but they show why chronological and crop-stratified reporting is preferable to a single pooled score.")
+    table5_headers = ["Subset", "Rows", "Water MAE", "Water R2", "N R2", "P2O5 R2", "K2O R2", "Decision accuracy"]
+    table5_rows = [
+        ["2024", "3,600", "0.4292", "0.9829", "0.9349", "0.9313", "0.9847", "0.9517"],
+        ["2025", "3,600", "0.4905", "0.9778", "0.9090", "0.9182", "0.9226", "0.9117"],
+        ["Sunflower", "1,776", "0.4474", "0.9794", "-", "-", "-", "0.9313"],
+        ["Maize", "1,848", "0.4879", "0.9787", "-", "-", "-", "0.9329"],
+        ["Sugar beet", "1,920", "0.4476", "0.9824", "-", "-", "-", "0.9375"],
+        ["Potato", "1,656", "0.4562", "0.9811", "-", "-", "-", "0.9239"],
+    ]
+    add_para(doc, "[Table 5 near here]")
+
+    doc.add_heading("3.6. Comparison with transparent baselines", level=2)
+    add_para(doc, "The proposed policy model substantially outperforms the two transparent baselines on the held-out years. The zero-output baseline obtains a decision accuracy of 0.6953 because the generated policy is intentionally sparse, but its water MAE is 7.4469 m3 mu-1 and its water R2 is negative. The training-mean baseline has a decision accuracy of 0.3047 because it predicts a positive mean water target for every row, and its water MAE is 10.7181 m3 mu-1. In contrast, the ExtraTrees policy reaches 0.9317 decision accuracy and 0.4599 water MAE. This comparison supports the claim that the model learns the teacher policy structure rather than simply reproducing the dominant zero class.")
+    table6_headers = ["Method", "Water MAE", "Water RMSE", "Water R2", "N MAE", "Decision accuracy"]
+    table6_rows = [
+        ["Zero-output baseline", "7.4469", "13.5368", "-0.4340", "0.1222", "0.6953"],
+        ["Training-mean baseline", "10.7181", "11.3424", "-0.0068", "0.2257", "0.3047"],
+        ["ExtraTrees policy (ours)", "0.4599", "1.5792", "0.9805", "0.0249", "0.9317"],
+    ]
+    add_para(doc, "[Table 6 near here]")
+
+    doc.add_heading("3.7. Reproducible controller trace", level=2)
+    add_para(doc, "A deterministic hardware-in-the-loop simulation was run with a 0.01 mu work order, a 1 L min-1 flow on each fertilizer channel and a 60 L min-1 outlet flow. The generated targets were 0.25 L for N, 0.188 L for P and 0.225 L for K. All fertilizer channels were initially active; after the cumulative readings crossed their individual targets, the controller entered OUTLET_TRANSFER at 2 s and enabled the outlet pump. It completed the 250 s outlet phase at 252 s with no fault. This trace demonstrates sequencing and fail-safe state transitions; it is not a pump calibration or field throughput measurement.")
+    table7_headers = ["Time", "Controller state", "Cumulative N/P/K (L)", "Active outputs", "Interpretation"]
+    table7_rows = [
+        ["0 s", "DOSING", "0.000 / 0.000 / 0.000", "N, P, K", "All requested fertilizer channels start"],
+        ["2 s", "OUTLET_TRANSFER", "0.400 / 0.200 / 0.400", "Outlet", "Each fertilizer target reached; outlet interlock released"],
+        ["252 s", "COMPLETE", "0.400 / 0.200 / 0.400", "None", "Outlet duration elapsed; all relays OFF"],
+    ]
+    add_para(doc, "[Table 7 near here]")
+
+    doc.add_heading("3.8. Missing-data decision matrix", level=2)
+    add_para(doc, "The missing-data policy was evaluated as a decision matrix rather than as a statistical imputation experiment. A valid soil moisture, pH and measured N/P/K set is required for automatic irrigation. If any of these critical fields is absent or stale, the server returns a hold decision and the interface explains that direct soil evidence is insufficient. Missing wind or forecast data can use a regional fallback record and are marked as fallback-derived. This asymmetry is deliberate: it preserves monitoring and manual review without allowing an unsupported automatic irrigation command. A future study should quantify the effect of each missingness pattern on decision utility using field-labeled data.")
 
     doc.add_heading("4. Discussion", level=1)
     doc.add_heading("4.1. What is innovative in the present system", level=2)
@@ -286,6 +349,11 @@ def build():
     doc.add_heading("4.3. Limitations and required next experiments", level=2)
     add_para(doc, "The most important limitation is label origin. The 39,600 samples are generated from regional historical weather, published crop-stage priors and single-probe setpoints. The model therefore reproduces a rule-based teacher; it has not learned a local yield response. The present evaluation also lacks randomized field treatments, calibrated flow-meter uncertainty, pump energy measurements, communication latency distributions and multi-season crop-quality labels. The project should next collect synchronized soil, flow, weather, management and harvest records; recalibrate each meter in situ; and compare the policy against timer irrigation and an agronomist baseline across independent plots. A future multi-objective model can then optimize yield, water productivity, nutrient use and energy under explicit constraints.")
     add_para(doc, "Operationally, the public-server dependency is a design trade-off. It simplifies model updates and allows a larger runtime environment, but it creates a need for a robust offline state and clear operator feedback. The current fail-closed soil gate and bounded relay state machine reduce physical risk, yet a production deployment should add local command expiry, signed firmware, authenticated transport, event persistence and an independent hardwired emergency stop.")
+    doc.add_heading("4.4. Deployment implications", level=2)
+    add_para(doc, "The design is appropriate for staged deployment. A first stage can use the server only for observation and work-order generation while an operator controls the relays manually. A second stage can enable automatic execution for irrigation with conservative limits and an active emergency stop. A third stage can enable closed-loop nutrient dosing after each flow meter has been calibrated and after the system has accumulated enough local observations to estimate delivery uncertainty. This staged approach is consistent with the evidence available in the current project: policy reproduction and actuator safety are demonstrated, while agronomic optimization is not yet demonstrated.")
+    add_para(doc, "The same staged logic also improves scientific evaluation. During shadow mode, every proposed decision can be logged without changing the irrigation schedule. The log can then be paired with soil moisture trajectories, actual flow, weather, energy and harvest observations. Counterfactual comparisons between the teacher, ExtraTrees and the farmer baseline become possible only after these synchronized records are collected. In this sense, the current software is both a controller and an instrumentation platform for the next experiment.")
+    doc.add_heading("4.5. Threats to validity", level=2)
+    add_para(doc, "Three threats to validity should be considered. First, the weather data are regional and the soil scenarios are generated; they may not represent the microclimate, soil texture or hydraulic response of the eventual farm. Second, the model metrics are conditional on the teacher labels and can be inflated when train and test distributions share the same rule structure. Third, controller simulation assumes ideal pulse timing and does not measure pump wear, air entrainment, pressure variation or meter bias. These threats do not invalidate the engineering baseline, but they limit the strength of any agronomic claim. The manuscript intentionally reports them so that a subsequent field study can be designed around them.")
 
     doc.add_heading("5. Conclusions", level=1)
     add_para(doc, "This paper presented ZhiRun, a safety-gated edge-cloud fertigation system built for a single soil probe and four-pump hardware configuration. The system combines RS485 sensing, server-side ExtraTrees policy distillation, asymmetric missing-data handling, independent flow-meter closure for N/P/K dosing, and an outlet-pump interlock. On a chronological independent test set, the policy reproduction model achieved R2 values of 0.9805 for water, 0.9230 for N, 0.9254 for P2O5 and 0.9576 for K2O, with 93.17% irrigation decision accuracy. These metrics establish a reproducible software and control baseline. They do not establish agronomic or economic superiority. Local field trials with measured yield, quality, water and nutrient outcomes are required before the system can be promoted as an optimized automatic irrigation strategy.")
@@ -317,6 +385,14 @@ def build():
     add_table(doc, table2_headers, table2_rows)
     doc.add_paragraph("Table 3. Safety and interlock rules verified in the controller implementation.", style="CaptionText")
     add_table(doc, table3_headers, table3_rows)
+    doc.add_paragraph("Table 4. Dataset composition, target sparsity and feature ranges.", style="CaptionText")
+    add_table(doc, table4_headers, table4_rows)
+    doc.add_paragraph("Table 5. Temporal and crop-level generalization results.", style="CaptionText")
+    add_table(doc, table5_headers, table5_rows)
+    doc.add_paragraph("Table 6. Comparison with transparent baselines on the independent test set.", style="CaptionText")
+    add_table(doc, table6_headers, table6_rows)
+    doc.add_paragraph("Table 7. Deterministic controller trace for an illustrative 0.01 mu work order.", style="CaptionText")
+    add_table(doc, table7_headers, table7_rows)
     doc.add_heading("Figures", level=1)
     add_para(doc, "Figure 1. ZhiRun edge-cloud hardware and data architecture.")
     doc.add_picture(str(fig1), width=Inches(6.2))

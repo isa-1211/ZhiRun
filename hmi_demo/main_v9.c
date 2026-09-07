@@ -676,11 +676,11 @@ static const char *clock_part(const char *iso_time) {
     return separator ? separator + 1 : iso_time;
 }
 
-static void update_two_day_forecast(const char *json) {
+static void update_three_day_forecast(const char *json) {
     weather_forecast_detail[0] = 0;
     size_t used = 0;
     unsigned valid_days = 0;
-    for (unsigned day = 1; day <= 2; day++) {
+    for (unsigned day = 0; day <= 2; day++) {
         char date[24] = "--", sunrise[32] = "--", sunset[32] = "--";
         if (!json_day_string(json, day, "time", date, sizeof(date))) continue;
         json_day_string(json, day, "sunrise", sunrise, sizeof(sunrise));
@@ -723,17 +723,17 @@ static void update_two_day_forecast(const char *json) {
             "Daylight %.1f h | sunshine %.1f h\n"
             "UV max %.1f | clear-sky %.1f\n"
             "Solar radiation %.2f MJ/m2 | ET0 %.2f mm\n%s",
-            day == 1 ? "Tomorrow" : "Following day", date,
+            day == 0 ? "Today" : (day == 1 ? "Tomorrow" : "Following day"), date,
             weather_code_name((int)code), code, temp_min, temp_max,
             apparent_min, apparent_max, precipitation, probability, precipitation_hours,
             rain, showers, snowfall, wind, gust, direction,
             clock_part(sunrise), clock_part(sunset), daylight / 3600.0, sunshine / 3600.0,
-            uv, uv_clear, radiation, et0, day == 1 ? "\n" : "");
+            uv, uv_clear, radiation, et0, day < 2 ? "\n" : "");
         if (written < 0 || (size_t)written >= sizeof(weather_forecast_detail) - used) break;
         used += (size_t)written;
         valid_days++;
     }
-    weather_forecast_available = valid_days == 2;
+    weather_forecast_available = valid_days == 3;
     if (weather_forecast_button) {
         if (weather_forecast_available) lv_obj_clear_state(weather_forecast_button, LV_STATE_DISABLED);
         else lv_obj_add_state(weather_forecast_button, LV_STATE_DISABLED);
@@ -758,7 +758,7 @@ static void show_weather_forecast(lv_event_t *event) {
     lv_obj_set_style_bg_color(weather_popup, lv_color_hex(0x101925), 0);
     lv_obj_set_style_border_color(weather_popup, lv_color_hex(0x58D3AE), 0);
     lv_obj_add_event_cb(weather_popup, weather_popup_deleted, LV_EVENT_DELETE, NULL);
-    lv_msgbox_add_title(weather_popup, "Next two days - detailed forecast");
+    lv_msgbox_add_title(weather_popup, "Today + next two days - details");
     lv_msgbox_add_close_button(weather_popup);
     lv_obj_t *text = lv_msgbox_add_text(weather_popup, weather_forecast_detail);
     lv_obj_set_style_text_color(text, lv_color_hex(0xDCE6F4), 0);
@@ -818,7 +818,7 @@ static void update_weather_page(const char *json) {
         snprintf(text, sizeof(text), "Weather API unavailable\nUsing local sensor data below\nAir temp %.1f C\nAir humidity %.1f %%\nWind %.1f m/s\nRain %.1f mm",
                  0.0, 0.0, 0.0, 0.0);
     lv_label_set_text(weather_label, text);
-    update_two_day_forecast(json);
+    update_three_day_forecast(json);
 }
 
 static void refresh(lv_timer_t *timer) {
@@ -868,7 +868,7 @@ static void refresh(lv_timer_t *timer) {
     fprintf(stderr, "HMI_REFRESH source_updated\n");
 
     char weather_response[4096];
-    if (request("GET", "/weather?compact=2d", NULL, weather_response, sizeof(weather_response)) == 0)
+    if (request("GET", "/weather?compact=3d", NULL, weather_response, sizeof(weather_response)) == 0)
         update_weather_page(weather_response);
     else if (weather_label) {
         char weather_text[220];
@@ -1152,7 +1152,7 @@ static void build_dashboard(void) {
     lv_obj_add_state(weather_forecast_button, LV_STATE_DISABLED);
     lv_obj_add_event_cb(weather_forecast_button, show_weather_forecast, LV_EVENT_CLICKED, NULL);
     lv_obj_t *weather_forecast_button_label = lv_label_create(weather_forecast_button);
-    lv_label_set_text(weather_forecast_button_label, "NEXT 2 DAYS DETAILS");
+    lv_label_set_text(weather_forecast_button_label, "TODAY + NEXT 2 DAYS");
     lv_obj_center(weather_forecast_button_label);
     weather_label = page_text(pages[1], "Waiting for environment data", 7, 56, 740);
     static const char *concentration_names[] = {"N", "P2O5", "K2O"};

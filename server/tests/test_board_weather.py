@@ -4,7 +4,7 @@ from server.zhirun_server import compact_board_weather
 
 
 class BoardWeatherTests(unittest.TestCase):
-    def test_returns_current_and_next_two_days_as_scalar_fields(self):
+    def test_returns_today_and_next_two_days_as_scalar_fields(self):
         compact = compact_board_weather({
             "ok": True,
             "latitude": 40.82,
@@ -17,6 +17,8 @@ class BoardWeatherTests(unittest.TestCase):
             },
         })
         self.assertEqual(compact["temperature_2m"], 21.0)
+        self.assertEqual(compact["day0_time"], "2026-09-06")
+        self.assertEqual(compact["day0_precipitation_sum"], 0.0)
         self.assertEqual(compact["day1_time"], "2026-09-07")
         self.assertEqual(compact["day2_time"], "2026-09-08")
         self.assertEqual(compact["day1_precipitation_sum"], 5.7)
@@ -24,6 +26,7 @@ class BoardWeatherTests(unittest.TestCase):
 
     def test_short_daily_response_does_not_invent_values(self):
         compact = compact_board_weather({"ok": True, "current": {}, "daily": {"time": ["today"]}})
+        self.assertEqual(compact["day0_time"], "today")
         self.assertNotIn("day1_time", compact)
         self.assertNotIn("day2_time", compact)
 

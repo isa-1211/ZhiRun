@@ -419,7 +419,7 @@ def public_model_payload(value):
         return {
             key: public_model_payload(item)
             for key, item in value.items()
-            if key not in {"crop", "area_mu"}
+            if key not in {"area_mu"}
         }
     if isinstance(value, list):
         return [public_model_payload(item) for item in value]

@@ -1222,5 +1222,8 @@ window.addEventListener('online',()=>{tick();loadCfg();startPolling();});
 window.addEventListener('offline',()=>{$('foot').textContent='网络已断开，等待恢复…';$('foot').className='foot off';});
 startPolling();
 boot();
+// Keep the crop entry available even if an optional dashboard refresh fails.
+window.addEventListener('DOMContentLoaded',()=>{try{ensureCropEntry();syncCropSelection();}catch(e){}});
+setTimeout(()=>{try{ensureCropEntry();syncCropSelection();}catch(e){}},0);
 </script>
 </body></html>

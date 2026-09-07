@@ -22,6 +22,11 @@ __pycache__/
 esp32_pump_controller/.pio/
 esp32_pump_controller/.venv/
 
+# Local toolchains and downloaded build dependencies
+downloads/
+toolchain/
+vendor_lvgl_demo2/
+
 # Device dumps and generated firmware backups
 esp32_backups/
 *.bin

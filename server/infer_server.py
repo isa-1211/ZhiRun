@@ -317,6 +317,7 @@ def decide(body):
     model = _model_class(crop=crop, area_mu=area, use_ml=_package is not None, provider=_provider)
     model._package = _package
     result = model.plan(*concentrations, environment)
+    result["decision"]["crop"] = crop
     return result["decision"], result
 
 

@@ -415,7 +415,7 @@
       </section>
       <section class="model-card">
         <h3>作物与日期</h3>
-        <div class="model-crop-row"><span id="modelCropLabel">作物：玉米</span><input id="modelCrop" type="hidden" value="玉米"><input id="farmCrop" type="hidden" value="玉米"><button class="btn sm" type="button" onclick="openCropDialog()">录入种植信息</button></div>
+        <div class="model-crop-row"><span id="modelCropLabel">作物：玉米</span><input id="modelCrop" type="hidden" value="玉米"><button class="btn sm" type="button" onclick="openCropDialog()">录入种植信息</button></div>
         <div class="model-date-note">决策日期：<b id="modelDate">自动获取当前日期</b> · 生育期按作物日历计算</div>
         <h3>三种母液浓度</h3>
         <div class="sub">人工输入仅用于把养分目标换算为三路母液体积</div>
@@ -530,7 +530,7 @@ function currentDecisionDate(){return new Date().toLocaleDateString('zh-CN',{yea
 function currentDecisionDateInput(){const d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');}
 function selectedCrop(){return $('modelCrop')?.value||$('farmCrop')?.value||'玉米';}
 function ensureCropEntry(){
-  const old=$('farmCrop');
+  const old=document.querySelector('.farm-crop-control select#farmCrop')||$('farmCrop');
   if(old&&old.tagName==='SELECT'){
     const hidden=document.createElement('input');hidden.type='hidden';hidden.id='farmCrop';hidden.value=old.value||'玉米';old.replaceWith(hidden);
     const button=document.createElement('button');button.type='button';button.className='farm-secondary';button.textContent='录入种植信息';button.onclick=openCropDialog;hidden.parentElement.appendChild(button);

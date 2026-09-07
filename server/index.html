@@ -164,7 +164,7 @@
   #p-model .model-service h2{margin:0;font-size:19px}.model-service-copy{display:flex;align-items:center;gap:14px;min-width:0}.model-tag{padding:4px 8px;border:1px solid #35526a;border-radius:5px;color:#a9c7df;font-size:11px}
   #p-model .model-card{min-width:0;padding:16px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
   #p-model .model-card h3{margin:0 0 12px;font-size:16px}.model-card .sub{margin:-5px 0 12px;font-size:12px}
-  #p-model .concentration-list{display:grid;gap:10px}.concentration-row{display:grid;grid-template-columns:54px 1fr 42px;align-items:center;gap:8px}.concentration-row b{font-size:14px}.concentration-row .in{min-width:0}
+  #p-model .concentration-list{display:grid;gap:10px}.concentration-row{display:grid;grid-template-columns:54px 1fr 42px;align-items:center;gap:8px}.concentration-row b{font-size:14px}.concentration-row .in{min-width:0}.model-crop-row{display:grid;grid-template-columns:54px 1fr;align-items:center;gap:8px;margin-bottom:11px}.model-crop-row label{font-size:13px;font-weight:700}.model-crop-row select{height:38px;min-width:0;padding:0 9px;border:1px solid var(--line);border-radius:6px;background:var(--panel2);color:var(--ink)}.model-date-note{margin:-3px 0 12px;color:var(--muted);font-size:11px}.farm-crop-control{display:flex;align-items:center;gap:5px;color:#657267;font-size:12px}.farm-crop-control select{height:34px;padding:0 7px;border:1px solid #d9e6da;border-radius:6px;background:#fff;color:#263629}
   #p-model .model-action{width:100%;margin-top:14px}.model-input-note{margin-top:12px;padding-top:10px;border-top:1px solid var(--line2);color:var(--muted);font-size:11px;line-height:1.55}
   #p-model .auto-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.auto-cell{min-width:0;padding:10px;border:1px solid var(--line2);border-radius:6px;background:#0f1723}.auto-cell span{display:block;color:var(--muted);font-size:11px}.auto-cell b{display:block;margin-top:5px;overflow:hidden;color:#eef5ff;font-size:18px;text-overflow:ellipsis;white-space:nowrap}.auto-cell small{font-size:10px;color:var(--dim)}
   #p-model .model-result{display:none;grid-column:1/-1}#p-model .model-result.has-result{display:block}.decision-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding-bottom:12px;border-bottom:1px solid var(--line)}.decision-head h3{margin:0}.decision-badge{padding:5px 9px;border-radius:5px;background:rgba(83,199,167,.12);color:var(--acc);font-size:12px}.decision-badge.blocked{background:rgba(224,90,90,.12);color:#e79aa8}
@@ -411,6 +411,9 @@
         <div id="mHealth" class="mstat">检测服务器模型中…</div><div id="mAutoStatus" class="mstat">每日 12:00 自动检查</div>
       </section>
       <section class="model-card">
+        <h3>作物与日期</h3>
+        <div class="model-crop-row"><label for="modelCrop">作物</label><select id="modelCrop"><option value="玉米">玉米</option><option value="马铃薯">马铃薯</option><option value="甜菜">甜菜</option><option value="向日葵">向日葵</option></select></div>
+        <div class="model-date-note">决策日期：<b id="modelDate">自动获取当前日期</b> · 生育期按作物日历计算</div>
         <h3>三种母液浓度</h3>
         <div class="sub">人工输入仅用于把养分目标换算为三路母液体积</div>
         <div class="concentration-list">
@@ -507,7 +510,7 @@
         </div>
       </section></aside>
   </section>
-  <section class="farm-bottom"><section class="farm-card farm-health"><div class="farm-health-grid"><div><h2>农情概览</h2><p id="farmSummary">正在汇总实时环境数据…</p></div><div class="farm-score"><b id="farmScore">--</b><span id="farmScoreMeta">模型参考评分</span></div></div></section><section class="farm-card farm-advice"><div class="farm-advice-head"><div><h2>V2 水肥工作单</h2><div style="margin-top:4px;color:#718076;font-size:12px">实时环境自动输入 · 服务器模型</div></div><div class="farm-advice-controls"><button class="farm-primary" id="farmPredictBtn" onclick="farmPredict()">生成工作单</button><button class="farm-secondary" id="farmRunBtn" onclick="executeModelJob('farmRunBtn','farmRunStatus')" disabled>执行工作单</button><span class="model-run-status" id="farmRunStatus">请先生成并审核工作单</span></div></div><div class="farm-advice-result" id="farmAdviceResult"><div class="farm-advice-note">三种母液浓度可在泵组右上角设置；模型不会直接启动当前测试泵。</div></div></section></section>
+  <section class="farm-bottom"><section class="farm-card farm-health"><div class="farm-health-grid"><div><h2>农情概览</h2><p id="farmSummary">正在汇总实时环境数据…</p></div><div class="farm-score"><b id="farmScore">--</b><span id="farmScoreMeta">模型参考评分</span></div></div></section><section class="farm-card farm-advice"><div class="farm-advice-head"><div><h2>V2 水肥工作单</h2><div style="margin-top:4px;color:#718076;font-size:12px">实时环境自动输入 · 服务器模型</div></div><div class="farm-advice-controls"><label class="farm-crop-control">作物 <select id="farmCrop"><option value="玉米">玉米</option><option value="马铃薯">马铃薯</option><option value="甜菜">甜菜</option><option value="向日葵">向日葵</option></select></label><button class="farm-primary" id="farmPredictBtn" onclick="farmPredict()">生成工作单</button><button class="farm-secondary" id="farmRunBtn" onclick="executeModelJob('farmRunBtn','farmRunStatus')" disabled>执行工作单</button><span class="model-run-status" id="farmRunStatus">请先生成并审核工作单</span></div></div><div class="farm-advice-result" id="farmAdviceResult"><div class="farm-advice-note">三种母液浓度可在泵组右上角设置；模型不会直接启动当前测试泵。</div></div></section></section>
   <footer class="farm-foot"><span id="farmUpdated">等待实时数据</span><span>智润设备实时监控</span></footer>
 </div></main>
 <div class="farm-modal" id="farmSettings" onclick="farmModalBackdrop(event)"><div class="farm-dialog" role="dialog" aria-modal="true" aria-labelledby="farmSettingsTitle"><div class="farm-dialog-head"><h2 id="farmSettingsTitle">V2 母液浓度</h2><button class="farm-dialog-close" title="关闭" onclick="closeFarmSettings()">×</button></div><section class="farm-setting-group"><h3>目标养分浓度</h3><div class="farm-settings-grid"><div class="farm-setting"><label>N (g/L)</label><input id="farmNConcentration" type="number" min="0.1" max="10000" step="0.1"></div><div class="farm-setting"><label>P₂O₅ (g/L)</label><input id="farmPConcentration" type="number" min="0.1" max="10000" step="0.1"></div><div class="farm-setting"><label>K₂O (g/L)</label><input id="farmKConcentration" type="number" min="0.1" max="10000" step="0.1"></div></div></section><div class="farm-settings-status" id="farmSettingsOut"></div><div class="farm-dialog-actions"><button class="farm-secondary" onclick="closeFarmSettings()">取消</button><button class="farm-primary" onclick="saveFarmSettings()">保存浓度</button></div></div></div>
@@ -520,6 +523,9 @@ let schema=[], cfg={};
 function fmt(v,d){return (v===null||v===undefined)?'--':(typeof v==='number'?v.toFixed(d):v);}
  const FARM_FIELDS=[['🌡','空气温度','airTemp','°C',1],['◉','空气湿度','airHum','%RH',1],['☁','CO₂ 浓度','co2','ppm',0],['☀','光照强度','lux','lux',0],['💧','土壤水分','soilMoist','%',1],['🌱','土壤温度','soilTemp','°C',1],['⚗','土壤 PH','soilPH','',2],['≋','瞬时风速','windSpeed','m/s',1],['◆','土壤氮 (N)','n','mg/kg',0],['◆','土壤磷 (P)','p','mg/kg',0],['◆','土壤钾 (K)','k','mg/kg',0],['☂','雨量','rainMm','mm/24h',1]];
 let farmWeatherData=null;
+function currentDecisionDate(){return new Date().toLocaleDateString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit'});}
+function selectedCrop(){return $('modelCrop')?.value||$('farmCrop')?.value||'玉米';}
+function syncCropSelection(value,notify=true){const crop=value||localStorage.getItem('zhirun-crop')||'玉米';['modelCrop','farmCrop'].forEach(id=>{const el=$(id);if(el){el.value=crop;el.onchange=()=>syncCropSelection(el.value,true);}});localStorage.setItem('zhirun-crop',crop);if($('modelDate'))$('modelDate').textContent=currentDecisionDate();if(notify&&value){fetchTO('/fertigation/auto/crop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({crop})},8000).catch(()=>{});}}
  function arrangeFarmPanels(){const left=document.querySelector('.farm-left'),right=document.querySelector('.farm-right'),weather=document.querySelector('.farm-weather'),device=document.querySelector('.farm-device');if(left&&right&&weather&&weather.parentElement!==left)left.appendChild(weather);if(left&&right&&device&&device.parentElement!==right)right.insertBefore(device,right.firstElementChild);}
 function setViewMode(mode){const farm=mode==='farm',recordButton=$('recordBtn'),recordTarget=$(farm?'farmHeaderActions':'classicHeaderActions');document.body.classList.toggle('farm-mode',farm);if(recordButton&&recordTarget)recordTarget.prepend(recordButton);localStorage.setItem('zhirun-view',mode);if(farm){arrangeFarmPanels();renderFarm(lastData);loadValve();loadWeather();}}
  function openFarmNetwork(){toggleFarmWifi();}
@@ -607,6 +613,7 @@ function cardHtml(f){
 let lastData={}, gridBuilt=false, gridOrder=[];
 function syncAutoModelStatus(auto){
   const el=$('mAutoStatus');if(!el||!auto)return;
+  if(auto.crop&&$('modelCrop')&&$('modelCrop').value!==auto.crop)syncCropSelection(auto.crop,false);
   if(!auto.last_run_at){el.textContent='每日 12:00 自动检查 · 尚未运行';return;}
   const stamp=new Date(Number(auto.last_run_at)*1000).toLocaleString();
   const status=auto.last_status==='ok'?'已完成':(auto.last_status==='rejected'?'已拒绝':'异常');
@@ -1024,7 +1031,7 @@ async function outletTest(act){
 }
 // ---- 面板3: 模型 (实时数据 -> 水肥策略服务) ----
 let modelData={};
-window.ZHIRUN_UI_BUILD='20260907-three-day-weather-v1';
+window.ZHIRUN_UI_BUILD='20260907-crop-date-v1';
 function modelNumber(value,digits=1){const number=Number(value);return Number.isFinite(number)?number.toFixed(digits):'--';}
 function syncModelSensor(){
   const values={modelSoilMoist:['soilMoist',1],modelSoilTemp:['soilTemp',1],modelSoilPh:['soilPH',1],modelN:['n',0],modelP:['p',0],modelK:['k',0],modelRain:['rainMm',1],modelAirTemp:['airTemp',1],modelAirHum:['airHum',1],modelWind:['windSpeed',1],modelLux:['lux',0]};
@@ -1063,7 +1070,7 @@ function renderModelResult(payload){
   const phaseRows=(job.phases||[]).map(phase=>'<div><span>'+PHASE_NAMES[phase.state]+'</span><b>'+activeOutputs(phase)+' · '+phaseTarget(phase)+'</b></div>').join('');
   const soilFallback=String(auto.source?.soil_sensor||'').includes('invalid_zero_frame');
   const executionStatus=String(t.execution_status||(Object.values(modelJobParams(payload)).some(value=>value>0)?'ready':(t.irrigate?'safety_blocked':'not_needed'))),executionReason=String(t.execution_reason||'');
-  const forecastRows='<div><span>生育阶段</span><b>'+String(t.stage||'--')+'</b></div><div><span>土壤水分</span><b>'+modelNumber(t.soil_moisture_pct,1)+'%</b></div><div><span>土壤 pH</span><b>'+modelNumber(auto.soil_ph,1)+'</b></div><div><span>土壤输入</span><b>'+(soilFallback?'传感器零帧，已拦截自动执行':'实时传感器')+'</b></div><div><span>灌溉判定</span><b>'+ (executionReason||({'ready':'满足灌溉条件','not_needed':'当前无需灌溉','safety_blocked':'安全门拦截灌溉','below_minimum':'低于最小执行量'}[executionStatus]||'等待模型判定')) +'</b></div><div><span>未来 2 日雨量</span><b>'+modelNumber(forecast.rain_next_2d_mm,1)+' mm</b></div><div><span>未来日均 ET₀</span><b>'+modelNumber(forecast.eto_daily_mm,1)+' mm</b></div><div><span>未来最大风速</span><b>'+modelNumber(forecast.wind_max_m_s,2)+' m/s</b></div>';
+  const forecastRows='<div><span>种植作物</span><b>'+String(t.crop||selectedCrop())+'</b></div><div><span>决策日期</span><b>'+String(auto.observation_time||currentDecisionDate()).slice(0,10)+'</b></div><div><span>生育阶段</span><b>'+String(t.stage||'--')+'</b></div><div><span>土壤水分</span><b>'+modelNumber(t.soil_moisture_pct,1)+'%</b></div><div><span>土壤 pH</span><b>'+modelNumber(auto.soil_ph,1)+'</b></div><div><span>土壤输入</span><b>'+(soilFallback?'传感器零帧，已拦截自动执行':'实时传感器')+'</b></div><div><span>灌溉判定</span><b>'+ (executionReason||({'ready':'满足灌溉条件','not_needed':'当前无需灌溉','safety_blocked':'安全门拦截灌溉','below_minimum':'低于最小执行量'}[executionStatus]||'等待模型判定')) +'</b></div><div><span>未来 2 日雨量</span><b>'+modelNumber(forecast.rain_next_2d_mm,1)+' mm</b></div><div><span>未来日均 ET₀</span><b>'+modelNumber(forecast.eto_daily_mm,1)+' mm</b></div><div><span>未来最大风速</span><b>'+modelNumber(forecast.wind_max_m_s,2)+' m/s</b></div>';
   const alerts=(t.alerts||[]).length?(t.alerts||[]).join('；'):'安全门通过，无附加告警';
   const executable=Object.values(modelJobParams(payload)).some(value=>value>0);
   const safetyBlocked=executionStatus==='safety_blocked',idleLabel=safetyBlocked?'安全条件未通过':'当前无需执行',idleStatus=executionReason||(safetyBlocked?'安全门已阻止执行':'当前环境未达到灌溉触发条件');
@@ -1078,7 +1085,7 @@ async function predict(){
   if(invalid){$('mOut').textContent='请填写有效的 N、P₂O₅、K₂O 母液浓度';return null;}
   $('predictBtn').disabled=true;$('mOut').textContent='服务器正在运行 V2 模型…';$('modelResult').classList.remove('has-result');
   try{
-    const body={n_concentration_g_l:numeric('nConcentration'),p_concentration_g_l:numeric('pConcentration'),k_concentration_g_l:numeric('kConcentration'),airTemp:lastData.airTemp,airHum:lastData.airHum,co2:lastData.co2,soilMoist:lastData.soilMoist,soilTemp:lastData.soilTemp,soilPH:lastData.soilPH,n:lastData.n,p:lastData.p,k:lastData.k,windSpeed:lastData.windSpeed,lux:lastData.lux,rainMm:lastData.rainMm,latitude:lastData.latitude,longitude:lastData.longitude};
+    const body={crop:selectedCrop(),n_concentration_g_l:numeric('nConcentration'),p_concentration_g_l:numeric('pConcentration'),k_concentration_g_l:numeric('kConcentration'),airTemp:lastData.airTemp,airHum:lastData.airHum,co2:lastData.co2,soilMoist:lastData.soilMoist,soilTemp:lastData.soilTemp,soilPH:lastData.soilPH,n:lastData.n,p:lastData.p,k:lastData.k,windSpeed:lastData.windSpeed,lux:lastData.lux,rainMm:lastData.rainMm,latitude:lastData.latitude,longitude:lastData.longitude};
     const r=await fetch(base+'/predict',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d=await r.json();
     if(!d.ok)throw new Error(d.error||'模型计算失败');
@@ -1165,6 +1172,7 @@ async function boot(){
     }
   }catch(e){}
   syncModelSensor();
+  syncCropSelection();
   await loadCfg();           // 失败也不抛, 内部已 catch
   await loadSchema();        // 同上; 即使空 schema 也先把空网格建好, 不留白屏
   await loadRecording();

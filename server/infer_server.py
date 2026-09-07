@@ -299,9 +299,12 @@ def environment_from_request(body, crop):
 def decide(body):
     if not _state["loaded"] and not load_model():
         raise RuntimeError(_state["error"] or "模型未就绪")
-    # V2's field entry intentionally exposes only three mother-liquor
-    # concentrations. Crop and area are installation defaults in this model.
-    crop = "玉米"
+    # The field entry exposes three mother-liquor concentrations. Area remains
+    # the installation default (1 mu), while crop is selected by the caller.
+    crop = str(first_value(body, "crop", "crop_name", default="玉米") or "玉米").strip()
+    if not isinstance(_config, dict) or crop not in _config.get("crops", {}):
+        valid = "、".join(_config.get("crops", {}).keys()) if isinstance(_config, dict) else "玉米"
+        raise ValueError(f"不支持的作物：{crop}；可选：{valid}")
     area = 1.0
     concentrations = (
         first_value(body, "n_concentration_g_l", "a_concentration_g_l", "n"),
@@ -447,7 +450,8 @@ class Handler(BaseHTTPRequestHandler):
                 "model": "hohhot_fertigation_policy_v2",
                 "schema": "fertigation_v2_automatic_environment",
                 "model_dir": MODEL_DIR,
-                "manual_inputs": ["N_g_L", "P2O5_g_L", "K2O_g_L"],
+                "manual_inputs": ["crop", "N_g_L", "P2O5_g_L", "K2O_g_L"],
+                "crops": list(_config.get("crops", {}).keys()) if isinstance(_config, dict) else [],
             })
         else:
             self.send_json(404, {"error": "not_found"})

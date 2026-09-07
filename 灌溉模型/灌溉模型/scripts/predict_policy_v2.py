@@ -12,8 +12,12 @@ except ImportError:
     from fertigation_model import FertigationModel
 
 
+CROPS = ("玉米", "马铃薯", "甜菜", "向日葵")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--crop", choices=CROPS, default="玉米", help="种植作物；日期自动取当前时间并计算生育阶段")
     parser.add_argument("--soil-moisture", type=float, required=True, help="单个土壤探针百分比")
     parser.add_argument("--soil-ph", type=float, required=True)
     parser.add_argument("--soil-n", type=float, required=True, help="有效氮 mg/kg")
@@ -31,7 +35,7 @@ def main() -> None:
         "soil_temperature_c": args.soil_temperature, "soil_ec_ds_m": args.soil_ec,
         "observation_time": datetime.now().astimezone().isoformat(),
     }
-    result = FertigationModel().plan(args.n_concentration, args.p_concentration,
+    result = FertigationModel(crop=args.crop).plan(args.n_concentration, args.p_concentration,
                                      args.k_concentration, environment)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

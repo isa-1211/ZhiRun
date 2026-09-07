@@ -53,6 +53,10 @@ AUTO_MODEL_MINUTE = int(os.environ.get("ZHIRUN_AUTO_MODEL_MINUTE", "0"))
 AUTO_MODEL_N_CONCENTRATION = float(os.environ.get("ZHIRUN_AUTO_MODEL_N_G_L", "100"))
 AUTO_MODEL_P_CONCENTRATION = float(os.environ.get("ZHIRUN_AUTO_MODEL_P_G_L", "80"))
 AUTO_MODEL_K_CONCENTRATION = float(os.environ.get("ZHIRUN_AUTO_MODEL_K_G_L", "120"))
+AUTO_MODEL_CROPS = ("玉米", "马铃薯", "甜菜", "向日葵")
+AUTO_MODEL_CROP = os.environ.get("ZHIRUN_AUTO_MODEL_CROP", "玉米").strip()
+if AUTO_MODEL_CROP not in AUTO_MODEL_CROPS:
+    AUTO_MODEL_CROP = "玉米"
 HISTORY_LIMIT = 720
 RECORD_INTERVAL_SECONDS = 5 * 60
 RECORDING_LIMIT = 105120  # Five-minute samples for one year.
@@ -110,6 +114,7 @@ _auto_model_state = {
     "enabled": AUTO_MODEL_ENABLED,
     "execute_enabled": AUTO_MODEL_EXECUTE,
     "schedule": f"{AUTO_MODEL_HOUR:02d}:{AUTO_MODEL_MINUTE:02d}",
+    "crop": AUTO_MODEL_CROP,
     "last_run_at": 0,
     "last_status": "never",
     "last_error": None,
@@ -151,6 +156,7 @@ def queue_farm_assessment(device_id, latest):
     payload.setdefault("latitude", WEATHER_FALLBACK_LATITUDE)
     payload.setdefault("longitude", WEATHER_FALLBACK_LONGITUDE)
     payload.update({
+        "crop": _auto_model_state.get("crop", AUTO_MODEL_CROP),
         "n_concentration_g_l": AUTO_MODEL_N_CONCENTRATION,
         "p_concentration_g_l": AUTO_MODEL_P_CONCENTRATION,
         "k_concentration_g_l": AUTO_MODEL_K_CONCENTRATION,
@@ -294,6 +300,9 @@ def load_state():
         _latest_by_device.update({key: value for key, value in state.get("latest", {}).items() if key in allowed_ids})
         _history_by_device.update({key: value for key, value in state.get("history", {}).items() if key in allowed_ids})
         _recordings_by_device.update({key: value for key, value in state.get("recordings", {}).items() if key in allowed_ids})
+        saved_crop = state.get("settings", {}).get("crop") if isinstance(state.get("settings"), dict) else None
+        if saved_crop in AUTO_MODEL_CROPS:
+            _auto_model_state["crop"] = saved_crop
         if len(allowed_ids) != len(devices):
             mark_dirty()
     except Exception as exc:
@@ -317,6 +326,7 @@ def save_state(force=False):
             "latest": _latest_by_device,
             "history": _history_by_device,
             "recordings": _recordings_by_device,
+            "settings": {"crop": _auto_model_state.get("crop", AUTO_MODEL_CROP)},
         }
         _save_dirty = False
     tmp = STATE_FILE + ".tmp"
@@ -347,6 +357,7 @@ def _auto_model_once():
     payload.setdefault("latitude", WEATHER_FALLBACK_LATITUDE)
     payload.setdefault("longitude", WEATHER_FALLBACK_LONGITUDE)
     payload.update({
+        "crop": _auto_model_state.get("crop", AUTO_MODEL_CROP),
         "n_concentration_g_l": AUTO_MODEL_N_CONCENTRATION,
         "p_concentration_g_l": AUTO_MODEL_P_CONCENTRATION,
         "k_concentration_g_l": AUTO_MODEL_K_CONCENTRATION,
@@ -1178,6 +1189,17 @@ class Handler(BaseHTTPRequestHandler):
         obj = self.read_json()
         if obj is None:
             self.send_json(400, {"error": "bad_json"})
+            return
+
+        if path == "/fertigation/auto/crop":
+            crop = str(obj.get("crop") or "").strip()
+            if crop not in AUTO_MODEL_CROPS:
+                self.send_json(400, {"ok": False, "message": "invalid_crop", "crops": list(AUTO_MODEL_CROPS)})
+                return
+            with _lock:
+                _auto_model_state["crop"] = crop
+                mark_dirty()
+            self.send_json(200, {"ok": True, "crop": crop})
             return
 
         if path == "/fertigation/predict":

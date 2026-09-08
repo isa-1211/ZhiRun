@@ -6,7 +6,7 @@ from scripts.recommend import recommend
 
 
 def dry_potato_decision():
-    return recommend("马铃薯", "块茎膨大", [18, 21], 28, 0, 5.5, 8, 1.0, 0, 0, 0, "low", "low", "low")
+    return recommend("马铃薯", "块茎膨大", 18, 0, 5.5, 8, 1.0, 0, 0, 0, "low", "low", "low")
 
 
 class JobTests(unittest.TestCase):

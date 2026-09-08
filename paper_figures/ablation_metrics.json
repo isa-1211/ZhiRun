@@ -1,0 +1,145 @@
+{
+  "label_origin": "generated teacher-policy targets; no yield labels",
+  "test_rows": 7200,
+  "full_model": {
+    "water_mae": 0.4599,
+    "water_r2": 0.9805,
+    "n_r2": 0.923,
+    "p2o5_r2": 0.9254,
+    "k2o_r2": 0.9576,
+    "decision_accuracy": 0.9317
+  },
+  "ablations": {
+    "No weather features": {
+      "removed": [
+        "doy",
+        "t_mean",
+        "t_max",
+        "t_min",
+        "rh",
+        "wind",
+        "radiation",
+        "rain_today",
+        "rain_next_2d",
+        "eto",
+        "gdd10_14d",
+        "rain_7d",
+        "eto_7d",
+        "dry_days",
+        "rain_24h_mm"
+      ],
+      "features": 31,
+      "metrics": {
+        "water_mae": 4.8725,
+        "water_r2": 0.4138,
+        "n_r2": 0.607,
+        "p2o5_r2": 0.6457,
+        "k2o_r2": 0.5731,
+        "decision_accuracy": 0.8003
+      }
+    },
+    "No soil features": {
+      "removed": [
+        "soil_moisture_pct",
+        "moisture_trigger_pct",
+        "moisture_target_pct",
+        "soil_ec",
+        "soil_ph",
+        "soil_n_mg_kg",
+        "soil_p_mg_kg",
+        "soil_k_mg_kg",
+        "soil_temperature_c"
+      ],
+      "features": 37,
+      "metrics": {
+        "water_mae": 2.9602,
+        "water_r2": 0.8352,
+        "n_r2": 0.8517,
+        "p2o5_r2": 0.8704,
+        "k2o_r2": 0.9001,
+        "decision_accuracy": 0.5932
+      }
+    },
+    "No crop-stage features": {
+      "removed": [
+        "crop",
+        "stage",
+        "kc",
+        "n_remaining",
+        "p_remaining",
+        "k_remaining",
+        "n_applied_stage",
+        "p_applied_stage",
+        "k_applied_stage",
+        "days_since_fertigation",
+        "fertilizer_interval_ready"
+      ],
+      "features": 35,
+      "metrics": {
+        "water_mae": 0.462,
+        "water_r2": 0.9807,
+        "n_r2": 0.8806,
+        "p2o5_r2": 0.8914,
+        "k2o_r2": 0.885,
+        "decision_accuracy": 0.925
+      }
+    },
+    "Soil-moisture threshold + mean dose": {
+      "positive_water_mean_m3_mu": 24.5046,
+      "metrics": {
+        "water_mae": 4.7158,
+        "water_r2": 0.1417,
+        "n_r2": -0.0695,
+        "p2o5_r2": -0.057,
+        "k2o_r2": -0.032,
+        "decision_accuracy": 0.8194
+      }
+    }
+  },
+  "decision_threshold_sensitivity": {
+    "0.1": {
+      "tn": 3645,
+      "fp": 1361,
+      "fn": 0,
+      "tp": 2194,
+      "accuracy": 0.811,
+      "precision": 0.6172,
+      "recall": 1.0,
+      "f1": 0.7633,
+      "specificity": 0.7281
+    },
+    "0.5": {
+      "tn": 4514,
+      "fp": 492,
+      "fn": 0,
+      "tp": 2194,
+      "accuracy": 0.9317,
+      "precision": 0.8168,
+      "recall": 1.0,
+      "f1": 0.8992,
+      "specificity": 0.9017
+    },
+    "1.0": {
+      "tn": 4749,
+      "fp": 257,
+      "fn": 0,
+      "tp": 2194,
+      "accuracy": 0.9643,
+      "precision": 0.8951,
+      "recall": 1.0,
+      "f1": 0.9447,
+      "specificity": 0.9487
+    },
+    "2.0": {
+      "tn": 4884,
+      "fp": 122,
+      "fn": 0,
+      "tp": 2194,
+      "accuracy": 0.9831,
+      "precision": 0.9473,
+      "recall": 1.0,
+      "f1": 0.9729,
+      "specificity": 0.9756
+    }
+  }
+}

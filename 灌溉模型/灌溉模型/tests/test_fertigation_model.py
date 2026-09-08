@@ -15,9 +15,7 @@ def dry_environment() -> EnvironmentInput:
         observation_time="2026-07-20",
         air_temperature_c=25,
         air_humidity_pct=45,
-        soil_moisture_20_pct=10,
-        soil_moisture_40_pct=12,
-        soil_moisture_60_pct=14,
+        soil_moisture_pct=12,
         soil_temperature_c=22,
         soil_n_mg_kg=800,
         soil_p_mg_kg=10,
@@ -110,7 +108,7 @@ class FertigationModelTests(unittest.TestCase):
     def test_chinese_sensor_mapping_and_ph_interlock(self):
         env = EnvironmentInput.from_mapping({
             "纬度": 40.84, "经度": 111.75, "空气温度": 25, "空气湿度": 40,
-            "CO2浓度": 420, "土壤湿度": [10, 12, 14], "土壤温度": 22,
+            "CO2浓度": 420, "土壤湿度": 12, "土壤温度": 22,
             "土壤氮浓度": 800, "土壤磷浓度": 10, "土壤钾浓度": 80,
             "风速": 2, "光照强度": 30000, "24h雨量": 0, "土壤pH": 9.0,
             "rain_next_2d_mm": 0, "eto_forecast_mm": 5.5, "observation_time": "2026-07-20",
@@ -122,9 +120,7 @@ class FertigationModelTests(unittest.TestCase):
 
     def test_hot_forecast_raises_trigger_and_is_used_for_decision(self):
         moderate = dry_environment()
-        moderate.soil_moisture_20_pct = 17.5
-        moderate.soil_moisture_40_pct = 17.5
-        moderate.soil_moisture_60_pct = 17.5
+        moderate.soil_moisture_pct = 17.5
         hot = EnvironmentInput.from_mapping({**moderate.as_dict(), "weather_forecast": [
             {"tmax_c": 36, "tmin_c": 25, "rain_mm": 0, "eto_mm": 8, "humidity_pct": 35,
              "wind_speed_m_s": 4, "light_lux": 50000},
@@ -134,17 +130,15 @@ class FertigationModelTests(unittest.TestCase):
         stage_cfg = CONFIG["crops"]["玉米"]["stages"]["抽雄吐丝"]
         base = dynamic_irrigation_threshold(stage_cfg, moderate)
         adjusted = dynamic_irrigation_threshold(stage_cfg, hot)
-        self.assertGreater(adjusted["dynamic_trigger_fc"], base["dynamic_trigger_fc"])
+        self.assertGreater(adjusted["dynamic_trigger_moisture_pct"], base["dynamic_trigger_moisture_pct"])
         result = FertigationModel(use_ml=False).plan(100, 80, 120, hot)
         self.assertEqual(result["automatic_inputs"]["forecast_summary"]["temperature_max_c"], 36.0)
         self.assertEqual(result["model_features"]["t_max"], 36.0)
-        self.assertEqual(result["decision"]["dynamic_trigger_relative_fc"], adjusted["dynamic_trigger_fc"])
+        self.assertEqual(result["decision"]["dynamic_trigger_moisture_pct"], adjusted["dynamic_trigger_moisture_pct"])
 
     def test_no_water_demand_is_not_reported_as_a_safety_block(self):
         environment = dry_environment()
-        environment.soil_moisture_20_pct = 24
-        environment.soil_moisture_40_pct = 24
-        environment.soil_moisture_60_pct = 24
+        environment.soil_moisture_pct = 50
         result = FertigationModel(use_ml=False).plan(100, 80, 120, environment)
         self.assertFalse(result["decision"]["irrigate"])
         self.assertEqual(result["decision"]["execution_status"], "not_needed")

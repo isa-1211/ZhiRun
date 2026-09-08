@@ -21,11 +21,12 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
 
-ROOT = Path(__file__).resolve().parents[1]
-MODEL_DIR = ROOT / "灌溉模型" / "灌溉模型"
+PAPER_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+MODEL_DIR = PROJECT_ROOT / "灌溉模型" / "灌溉模型"
 DATA = MODEL_DIR / "data" / "processed" / "policy_v2_samples.csv.gz"
 MODEL_PATH = MODEL_DIR / "models" / "hohhot_fertigation_policy_v2.joblib"
-OUT = ROOT / "paper_figures"
+OUT = PAPER_ROOT / "figures"
 OUT.mkdir(exist_ok=True)
 
 BUNDLE = joblib.load(MODEL_PATH)

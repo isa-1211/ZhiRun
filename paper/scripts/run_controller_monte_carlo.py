@@ -8,14 +8,15 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
-MODEL_ROOT = ROOT / "灌溉模型" / "灌溉模型"
+PAPER_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+MODEL_ROOT = PROJECT_ROOT / "灌溉模型" / "灌溉模型"
 sys.path.insert(0, str(MODEL_ROOT))
 
 from scripts.build_job import HARDWARE  # noqa: E402
 from scripts.controller import FlowController, SensorFrame, State  # noqa: E402
 
-OUT = ROOT / "paper_figures" / "controller_monte_carlo_metrics.json"
+OUT = PAPER_ROOT / "figures" / "controller_monte_carlo_metrics.json"
 
 
 def job_from_targets(targets: dict[str, float], outlet_s: int) -> dict:

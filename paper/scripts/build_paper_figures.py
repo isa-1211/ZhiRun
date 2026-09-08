@@ -19,10 +19,11 @@ from sklearn.metrics import (
 )
 
 
-ROOT = Path(__file__).resolve().parents[1]
-DATA = ROOT / "灌溉模型" / "灌溉模型" / "data" / "processed" / "policy_v2_samples.csv.gz"
-MODEL_PATH = ROOT / "灌溉模型" / "灌溉模型" / "models" / "hohhot_fertigation_policy_v2.joblib"
-OUT = ROOT / "paper_figures"
+PAPER_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA = PROJECT_ROOT / "灌溉模型" / "灌溉模型" / "data" / "processed" / "policy_v2_samples.csv.gz"
+MODEL_PATH = PROJECT_ROOT / "灌溉模型" / "灌溉模型" / "models" / "hohhot_fertigation_policy_v2.joblib"
+OUT = PAPER_ROOT / "figures"
 OUT.mkdir(exist_ok=True)
 
 TARGETS = ["water_m3_mu", "n_kg_mu", "p2o5_kg_mu", "k2o_kg_mu"]

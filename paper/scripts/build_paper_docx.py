@@ -13,10 +13,10 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, Cm, RGBColor
 
 
-ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "论文初稿_Journal_of_Agricultural_Engineering.docx"
-OUT_SUPP = ROOT / "论文补充材料_Journal_of_Agricultural_Engineering.docx"
-FIG_DIR = ROOT / "paper_figures"
+PAPER_ROOT = Path(__file__).resolve().parents[1]
+OUT = PAPER_ROOT / "manuscript" / "论文初稿_Journal_of_Agricultural_Engineering.docx"
+OUT_SUPP = PAPER_ROOT / "manuscript" / "论文补充材料_Journal_of_Agricultural_Engineering.docx"
+FIG_DIR = PAPER_ROOT / "figures"
 FIG_DIR.mkdir(exist_ok=True)
 
 

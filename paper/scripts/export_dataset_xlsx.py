@@ -14,8 +14,9 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 
-ROOT = Path(__file__).resolve().parents[1] / "灌溉模型" / "灌溉模型"
-OUTPUT = Path(__file__).resolve().parents[1] / "数据集汇总.xlsx"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+ROOT = PROJECT_ROOT / "灌溉模型" / "灌溉模型"
+OUTPUT = Path(__file__).resolve().parents[1] / "data" / "数据集汇总.xlsx"
 
 HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
 HEADER_FONT = Font(color="FFFFFF", bold=True)

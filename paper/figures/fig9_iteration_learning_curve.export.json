@@ -1,0 +1,26 @@
+{
+  "figure": "fig9_iteration_learning_curve",
+  "generated_utc": "2026-09-08T13:01:43.580653+00:00",
+  "physical_size_in": [
+    6.6929,
+    2.65
+  ],
+  "raster_dpi": 600,
+  "pixel_size": [
+    4016,
+    1590
+  ],
+  "formats": [
+    "png",
+    "pdf",
+    "svg",
+    "tiff"
+  ],
+  "background": "opaque white",
+  "color_encoding": "color plus marker, line style, or hatch where categories are compared",
+  "source_script": "paper/scripts/run_iteration_experiments.py",
+  "source_data": "灌溉模型/灌溉模型/data/processed/policy_v2_samples.csv.gz",
+  "validation_split": "2023",
+  "replicates": "five fixed random seeds per training fraction",
+  "uncertainty": "error bars show one sample standard deviation across seeds"
+}

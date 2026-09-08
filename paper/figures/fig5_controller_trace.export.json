@@ -1,0 +1,26 @@
+{
+  "figure": "fig5_controller_trace",
+  "generated_utc": "2026-09-08T13:01:56.911977+00:00",
+  "physical_size_in": [
+    6.6929,
+    2.8
+  ],
+  "raster_dpi": 600,
+  "pixel_size": [
+    4016,
+    1680
+  ],
+  "formats": [
+    "png",
+    "pdf",
+    "svg",
+    "tiff"
+  ],
+  "background": "opaque white",
+  "color_encoding": "color plus marker, line style, or hatch where categories are compared",
+  "source_script": "paper/scripts/build_paper_figures.py",
+  "source_data": "灌溉模型/灌溉模型/data/processed/policy_v2_samples.csv.gz",
+  "model": "灌溉模型/灌溉模型/models/hohhot_fertigation_policy_v2.joblib",
+  "seed_policy": "fixed seeds documented in the source script",
+  "missing_data": "not imputed for plots; source rows and model outputs are used as stored"
+}

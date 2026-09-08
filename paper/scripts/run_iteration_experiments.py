@@ -20,6 +20,8 @@ from sklearn.metrics import accuracy_score, mean_absolute_error, r2_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
+from figure_style import COLORS, FULL_WIDTH_IN, export_figure, panel_label, publication_style
+
 
 PAPER_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -99,26 +101,35 @@ def make_figure(curve: pd.DataFrame, sensitivity: pd.DataFrame) -> None:
         mae_mean=("water_mae", "mean"), mae_sd=("water_mae", "std"),
         nutrient_mean=("nutrient_macro_r2", "mean"), nutrient_sd=("nutrient_macro_r2", "std"),
     ).reset_index()
-    fig, axes = plt.subplots(1, 3, figsize=(8.2, 3.25), constrained_layout=True)
+    fig, axes = plt.subplots(1, 3, figsize=(FULL_WIDTH_IN, 2.65), layout="constrained")
     x = summary.fraction.to_numpy() * 100
-    axes[0].errorbar(x, summary.decision_mean * 100, yerr=summary.decision_sd * 100, marker="o", capsize=3, color="#20639B")
+    axes[0].errorbar(x, summary.decision_mean * 100, yerr=summary.decision_sd * 100, marker="o", capsize=3, color=COLORS["water"], linestyle="-")
     axes[0].set_ylabel("Decision accuracy (%)")
-    axes[1].errorbar(x, summary.mae_mean, yerr=summary.mae_sd, marker="o", capsize=3, color="#ED553B")
-    axes[1].set_ylabel("Water MAE (m3 mu-1)")
-    axes[2].errorbar(x, summary.nutrient_mean, yerr=summary.nutrient_sd, marker="o", capsize=3, color="#3CAEA3")
-    axes[2].set_ylabel("Nutrient macro R2")
+    axes[1].errorbar(x, summary.mae_mean, yerr=summary.mae_sd, marker="s", capsize=3, color=COLORS["nitrogen"], linestyle="--")
+    axes[1].set_ylabel("Water MAE (m³ mu⁻¹)")
+    axes[2].errorbar(x, summary.nutrient_mean, yerr=summary.nutrient_sd, marker="^", capsize=3, color=COLORS["phosphorus"], linestyle="-.")
+    axes[2].set_ylabel("Nutrient macro R²")
     for index, ax in enumerate(axes):
         ax.set_xlabel("Training data used (%)")
-        ax.set_title(chr(65 + index))
-        ax.grid(color="#D9E1E8", linewidth=.6)
-    fig.suptitle("Repeated learning curve (2023 validation; five seeds per size)", fontsize=11, fontweight="bold", color="#173F5F")
-    for ext in ("png", "pdf", "svg"):
-        kwargs = {"dpi": 600} if ext == "png" else {}
-        fig.savefig(OUT / f"fig9_iteration_learning_curve.{ext}", bbox_inches="tight", **kwargs)
-    plt.close(fig)
+        ax.set_xticks(x)
+        ax.grid(color=COLORS["grid"], linewidth=.6)
+        panel_label(ax, "abc"[index])
+    export_figure(
+        fig,
+        OUT,
+        "fig9_iteration_learning_curve",
+        provenance={
+            "source_script": "paper/scripts/run_iteration_experiments.py",
+            "source_data": str(DATA.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+            "validation_split": "2023",
+            "replicates": "five fixed random seeds per training fraction",
+            "uncertainty": "error bars show one sample standard deviation across seeds",
+        },
+    )
 
 
 def main() -> None:
+    publication_style()
     data = pd.read_csv(DATA)
     train = data[data.year <= 2022].copy()
     validation = data[data.year == 2023].copy()

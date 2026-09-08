@@ -15,8 +15,8 @@
       "train_rows": 2880,
       "decision_mean": 0.8665555555555555,
       "decision_sd": 0.0036830442319926954,
-      "water_mae_mean": 0.759306855820106,
-      "water_mae_sd": 0.017457683115818627,
+      "water_mae_mean": 0.7593068558201059,
+      "water_mae_sd": 0.017457683115818568,
       "water_r2_mean": 0.9729990342710648,
       "water_r2_sd": 0.0015795394210577913,
       "nutrient_r2_mean": 0.8591387111125837,
@@ -28,8 +28,8 @@
       "train_rows": 7200,
       "decision_mean": 0.896888888888889,
       "decision_sd": 0.003930334701294223,
-      "water_mae_mean": 0.5309809656084659,
-      "water_mae_sd": 0.0055596099349304534,
+      "water_mae_mean": 0.5309809656084657,
+      "water_mae_sd": 0.005559609934930542,
       "water_r2_mean": 0.9822191662891152,
       "water_r2_sd": 0.0008587883808123007,
       "nutrient_r2_mean": 0.9183587060692856,
@@ -42,7 +42,7 @@
       "decision_mean": 0.9231111111111112,
       "decision_sd": 0.006875771561643137,
       "water_mae_mean": 0.3989699523809525,
-      "water_mae_sd": 0.013474108139469903,
+      "water_mae_sd": 0.01347410813946987,
       "water_r2_mean": 0.9871277008994033,
       "water_r2_sd": 0.0007026796168518616,
       "nutrient_r2_mean": 0.9475318186490569,
@@ -54,8 +54,8 @@
       "train_rows": 21600,
       "decision_mean": 0.9357222222222223,
       "decision_sd": 0.005287272161860091,
-      "water_mae_mean": 0.3639075492063493,
-      "water_mae_sd": 0.007378970261042421,
+      "water_mae_mean": 0.36390754920634927,
+      "water_mae_sd": 0.00737897026104242,
       "water_r2_mean": 0.9879569915638188,
       "water_r2_sd": 0.0006303898087083458,
       "nutrient_r2_mean": 0.9604069585793109,
@@ -84,7 +84,7 @@
       "water_r2": 0.9903840832241839,
       "nutrient_macro_r2": 0.9697937696683363,
       "decision_accuracy": 0.9372222222222222,
-      "fit_seconds": 0.5403995999949984
+      "fit_seconds": 0.4880307000130415
     },
     {
       "n_estimators": 100,
@@ -94,7 +94,7 @@
       "water_r2": 0.9888144116069691,
       "nutrient_macro_r2": 0.9640690470724378,
       "decision_accuracy": 0.9380555555555555,
-      "fit_seconds": 0.5209642999980133
+      "fit_seconds": 0.46282380004413426
     },
     {
       "n_estimators": 100,
@@ -104,7 +104,7 @@
       "water_r2": 0.9885329377000429,
       "nutrient_macro_r2": 0.9561154666122627,
       "decision_accuracy": 0.9277777777777778,
-      "fit_seconds": 0.5120464999927208
+      "fit_seconds": 0.4587745000026189
     },
     {
       "n_estimators": 200,
@@ -114,7 +114,7 @@
       "water_r2": 0.9901896501114827,
       "nutrient_macro_r2": 0.9696665629586864,
       "decision_accuracy": 0.9408333333333333,
-      "fit_seconds": 0.9976508999825455
+      "fit_seconds": 0.8818614999763668
     },
     {
       "n_estimators": 200,
@@ -124,27 +124,27 @@
       "water_r2": 0.9896446265530606,
       "nutrient_macro_r2": 0.9659682823816794,
       "decision_accuracy": 0.9347222222222222,
-      "fit_seconds": 0.947993999987375
+      "fit_seconds": 0.8427149999770336
     },
     {
       "n_estimators": 200,
       "min_samples_leaf": 4,
       "train_rows": 28800,
-      "water_mae": 0.3473718446318341,
+      "water_mae": 0.3473718446318342,
       "water_r2": 0.9886325473224169,
       "nutrient_macro_r2": 0.9577195272254402,
       "decision_accuracy": 0.9358333333333333,
-      "fit_seconds": 0.9026985000236891
+      "fit_seconds": 0.8512094000470825
     },
     {
       "n_estimators": 350,
       "min_samples_leaf": 1,
       "train_rows": 28800,
-      "water_mae": 0.3266996031746032,
+      "water_mae": 0.3266996031746033,
       "water_r2": 0.9898314790864818,
       "nutrient_macro_r2": 0.9679648257669374,
       "decision_accuracy": 0.9394444444444444,
-      "fit_seconds": 1.6672071999928448
+      "fit_seconds": 1.4964982999954373
     },
     {
       "n_estimators": 350,
@@ -154,7 +154,7 @@
       "water_r2": 0.9893224189019116,
       "nutrient_macro_r2": 0.9660673562218162,
       "decision_accuracy": 0.9311111111111111,
-      "fit_seconds": 1.5832365999813192
+      "fit_seconds": 1.4048953999881633
     },
     {
       "n_estimators": 350,
@@ -164,7 +164,7 @@
       "water_r2": 0.9882894181591136,
       "nutrient_macro_r2": 0.9568815559844256,
       "decision_accuracy": 0.9386111111111111,
-      "fit_seconds": 1.5324167999788187
+      "fit_seconds": 1.3744264999986626
     },
     {
       "n_estimators": 500,
@@ -174,7 +174,7 @@
       "water_r2": 0.9897051491423127,
       "nutrient_macro_r2": 0.9684343397936722,
       "decision_accuracy": 0.9344444444444444,
-      "fit_seconds": 2.3798477000091225
+      "fit_seconds": 2.1005301999975927
     },
     {
       "n_estimators": 500,
@@ -184,7 +184,7 @@
       "water_r2": 0.9896093967081844,
       "nutrient_macro_r2": 0.966728369139427,
       "decision_accuracy": 0.9358333333333333,
-      "fit_seconds": 2.2306232000119053
+      "fit_seconds": 2.0262938999803737
     },
     {
       "n_estimators": 500,
@@ -194,7 +194,7 @@
       "water_r2": 0.9885591104787551,
       "nutrient_macro_r2": 0.9564762352699079,
       "decision_accuracy": 0.9377777777777778,
-      "fit_seconds": 2.140290700015612
+      "fit_seconds": 1.958147800003644
     }
   ]
 }

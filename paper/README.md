@@ -5,7 +5,7 @@
 ## 目录结构
 
 - `manuscript/`：期刊主稿和补充材料 DOCX。
-- `figures/`：论文图件、实验指标 JSON 和迭代结果 CSV。
+- `figures/`：论文图件、逐图导出清单、实验指标 JSON 和迭代结果 CSV。
 - `scripts/`：数据导出、实验复现、论文图件和 DOCX 生成脚本。
 - `data/`：汇总导出的 XLSX 数据集。
 - `notes/`：论文写作依据和项目创新点说明。
@@ -40,3 +40,5 @@ python paper/scripts/export_dataset_xlsx.py
 ```
 
 主稿按照期刊限制保留 9 个表和 6 幅图；详细实验表格、附录和其余图片保存在补充材料中。
+
+图件遵循 Journal of Agricultural Engineering 的 170 mm 最大宽度，统一导出 600 dpi PNG/TIFF、可编辑 SVG 和嵌入字体的 PDF。颜色采用色觉缺陷友好的语义配色，并以纹理、点形或线型提供非颜色冗余编码。绘图流程参考 K-Dense-AI/scientific-agent-skills 的 scientific-visualization skill；原始数值、模型输出和实验结果未作修改。

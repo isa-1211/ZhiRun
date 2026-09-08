@@ -278,6 +278,7 @@ def build():
     add_para(doc, "For each continuous target, MAE measures the average absolute deviation in the native target unit, RMSE emphasizes larger deviations, and R2 measures variance explained relative to the test-set mean. The binary irrigation decision threshold is 0.5 m3 mu-1, chosen to separate a zero/hold decision from a positive irrigation recommendation in the teacher policy. The baseline comparison uses exactly the same rows and target units as the fitted model. Sampling uncertainty is estimated with the non-parametric bootstrap (Efron, 1979). No test-time tuning is applied. Reported values are rounded to four decimal places only after calculation.")
     doc.add_heading("2.8. Data quality and reproducibility", level=2)
     add_para(doc, "The weather file is parsed by date, sentinel values are converted to missing values, and gaps of up to three days are linearly interpolated before feature construction. The sample generator fixes the NumPy random seed at 42. Soil scenarios are bounded to 2-95% during generation, while runtime validation accepts only a measured moisture value in the physical 0-100% range. All feature names, target names, split years, model hyperparameters and metric calculations are stored in the training script and the model metrics JSON. This makes the reported numbers reproducible from the repository without access to the live farm device.")
+    add_para(doc, "Scientific figures were redesigned and export-audited using the Scientific Agent Skills visualization workflow (Kassis et al., 2026). The plotted values remain direct outputs of the repository data, fitted model and controller simulations; the workflow was used only for visual encoding, accessibility, physical sizing and multi-format export. Each figure is accompanied by a machine-readable export manifest.")
     doc.add_heading("2.9. Baselines and robustness analysis", level=2)
     add_para(doc, "Two simple baselines were calculated on the same independent test set. The zero-output baseline always returns zero water and nutrients, representing a controller that never irrigates. The training-mean baseline returns the mean target vector calculated from 2015-2022. These baselines are intentionally weak but provide a transparent reference for policy reproduction. We additionally report performance separately for 2024 and 2025 and separately for each crop to expose temporal and crop-specific variation rather than hiding it in one aggregate score.")
     doc.add_heading("2.10. Feature ablation and transparent agronomic reference", level=2)
@@ -504,6 +505,7 @@ def build():
         "Jimenez AF, Ortiz BV, Bondesan L, Morata G, Damianidis D, 2021. Long short-term memory neural network for irrigation management: a case study from Southern Alabama, USA. Precis Agric 22:475-92. https://doi.org/10.1007/s11119-020-09753-z",
         "Jones HG, 2004. Irrigation scheduling: advantages and pitfalls of plant-based methods. J Exp Bot 55:2427-36. https://doi.org/10.1093/jxb/erh213",
         "Kamilaris A, Prenafeta-Boldu FX, 2018. Deep learning in agriculture: a survey. Comput Electron Agric 147:70-90. https://doi.org/10.1016/j.compag.2018.02.016",
+        "Kassis T, Agarwal V, He Y, Patel D, Brueckner AM, 2026. Scientific Agent Skills: a library of procedural knowledge for research agents. arXiv:2609.00065. https://doi.org/10.48550/arXiv.2609.00065",
         "Khanna A, Kaur S, 2019. Evolution of Internet of Things (IoT) and its significant impact in the field of precision agriculture. Comput Electron Agric 157:218-31. https://doi.org/10.1016/j.compag.2018.12.039",
         "Liakos KG, Busato P, Moshou D, Pearson S, Bochtis D, 2018. Machine learning in agriculture: a review. Sensors 18:2674. https://doi.org/10.3390/s18082674",
         "NASA Langley Research Center, 2024. NASA Prediction Of Worldwide Energy Resources (POWER) project documentation. Available from: https://power.larc.nasa.gov/docs/",
@@ -576,6 +578,7 @@ def build():
     for caption, figure in main_figures[:6]:
         doc.add_paragraph(caption, style="CaptionText")
         doc.add_picture(str(figure), width=Inches(6.2))
+        doc.inline_shapes[-1]._inline.docPr.set("descr", caption)
 
     # The journal limits the combined number of tables and figures to 15.
     # Detailed robustness and iteration outputs are retained in a separate,
@@ -602,6 +605,7 @@ def build():
     for caption, figure in main_figures[6:]:
         supp.add_paragraph(caption.replace("Figure 7", "Supplementary Figure S1").replace("Figure 8", "Supplementary Figure S2").replace("Figure 9", "Supplementary Figure S3"), style="CaptionText")
         supp.add_picture(str(figure), width=Inches(6.2))
+        supp.inline_shapes[-1]._inline.docPr.set("descr", caption)
     supp.core_properties.title = "ZhiRun supplementary material"
     supp.core_properties.author = "Li Tianhao; Liu Jiangping"
     supp.save(OUT_SUPP)

@@ -18,6 +18,8 @@ from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, mean_abs
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
+from figure_style import COLORS, FULL_WIDTH_IN, apply_hatches, export_figure, publication_style
+
 
 PAPER_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -63,6 +65,7 @@ def fit_ablation(train: pd.DataFrame, test: pd.DataFrame, features: list[str]) -
 
 
 def main() -> None:
+    publication_style()
     df = pd.read_csv(DATA)
     train, test = df[df.year <= 2022].copy(), df[df.year >= 2024].copy()
     full_prediction = np.maximum(0, bundle["pipeline"].predict(test[ALL_FEATURES]))
@@ -102,17 +105,24 @@ def main() -> None:
 
     names = ["Full model", "No weather", "No soil", "No crop-stage", "Moisture threshold\n+mean dose"]
     vals = [result["full_model"]["decision_accuracy"]] + [result["ablations"][n]["metrics"]["decision_accuracy"] for n in result["ablations"]]
-    fig, ax = plt.subplots(figsize=(7.2, 3.8), constrained_layout=True)
-    colors = ["#20639B", "#3CAEA3", "#F6C85F", "#ED553B", "#5B6770"]
-    bars = ax.bar(names, np.array(vals) * 100, color=colors, width=0.65)
+    fig, ax = plt.subplots(figsize=(FULL_WIDTH_IN, 3.25), layout="constrained")
+    bars = ax.bar(names, np.array(vals) * 100, color=COLORS["water"], width=0.65)
+    apply_hatches(bars)
     ax.set_ylim(0, 100); ax.set_ylabel("Irrigation decision accuracy (%)")
-    ax.set_title("Baseline and feature-ablation comparison\n(independent test years 2024-2025; n = 7,200)", fontsize=11, fontweight="bold", color="#173F5F")
-    ax.tick_params(axis="x", rotation=0); ax.grid(axis="y", color="#D9E1E8", linewidth=.6)
-    for bar, val in zip(bars, vals): ax.text(bar.get_x() + bar.get_width() / 2, val * 100 + 1, f"{val * 100:.1f}%", ha="center", va="bottom", fontsize=8)
-    fig.savefig(OUT / "fig8_ablation_comparison.png", dpi=600, bbox_inches="tight")
-    fig.savefig(OUT / "fig8_ablation_comparison.pdf", bbox_inches="tight")
-    fig.savefig(OUT / "fig8_ablation_comparison.svg", bbox_inches="tight")
-    plt.close(fig)
+    ax.grid(axis="y", color=COLORS["grid"], linewidth=.6)
+    for bar, val in zip(bars, vals): ax.text(bar.get_x() + bar.get_width() / 2, val * 100 + 1, f"{val * 100:.1f}%", ha="center", va="bottom", fontsize=7)
+    export_figure(
+        fig,
+        OUT,
+        "fig8_ablation_comparison",
+        provenance={
+            "source_script": "paper/scripts/run_ablation_experiment.py",
+            "source_data": str(DATA.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+            "model": str(MODEL_PATH.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+            "test_split": "2024-2025, n=7200",
+            "uncertainty": "point estimates; no interval shown",
+        },
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

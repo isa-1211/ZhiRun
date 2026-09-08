@@ -1,0 +1,138 @@
+{
+  "test_rows": 7200,
+  "bootstrap_replicates": 1000,
+  "bootstrap_ci95": {
+    "water_m3_mu": {
+      "mae_ci95": [
+        0.4262,
+        0.4979
+      ],
+      "rmse_ci95": [
+        1.4636,
+        1.699
+      ],
+      "r2_ci95": [
+        0.9774,
+        0.9832
+      ]
+    },
+    "n_kg_mu": {
+      "mae_ci95": [
+        0.022,
+        0.0278
+      ],
+      "rmse_ci95": [
+        0.1132,
+        0.1439
+      ],
+      "r2_ci95": [
+        0.9065,
+        0.9394
+      ]
+    },
+    "p2o5_kg_mu": {
+      "mae_ci95": [
+        0.0131,
+        0.0166
+      ],
+      "rmse_ci95": [
+        0.0663,
+        0.0853
+      ],
+      "r2_ci95": [
+        0.9081,
+        0.942
+      ]
+    },
+    "k2o_kg_mu": {
+      "mae_ci95": [
+        0.0109,
+        0.0138
+      ],
+      "rmse_ci95": [
+        0.0511,
+        0.0836
+      ],
+      "r2_ci95": [
+        0.9362,
+        0.9751
+      ]
+    }
+  },
+  "positive_event_metrics": {
+    "water_m3_mu": {
+      "precision": 0.8226,
+      "recall": 1.0,
+      "f1": 0.9027,
+      "balanced_accuracy": 0.9528,
+      "positive_n": 2194
+    },
+    "n_kg_mu": {
+      "precision": 0.3551,
+      "recall": 1.0,
+      "f1": 0.5241,
+      "balanced_accuracy": 0.9161,
+      "positive_n": 609
+    },
+    "p2o5_kg_mu": {
+      "precision": 0.359,
+      "recall": 1.0,
+      "f1": 0.5284,
+      "balanced_accuracy": 0.935,
+      "positive_n": 489
+    },
+    "k2o_kg_mu": {
+      "precision": 0.255,
+      "recall": 1.0,
+      "f1": 0.4064,
+      "balanced_accuracy": 0.9267,
+      "positive_n": 344
+    }
+  },
+  "optional_weather_masking": {
+    "fields": [
+      "wind",
+      "rain_next_2d",
+      "rain_today"
+    ],
+    "decision_agreement": 0.8526,
+    "changed_decisions": 1061,
+    "masked_test_decision_accuracy_vs_teacher": 0.7975
+  },
+  "dataset": {
+    "rows": 39600,
+    "years": [
+      2015,
+      2016,
+      2017,
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025
+    ],
+    "crop_counts": {
+      "向日葵": 9768,
+      "玉米": 10164,
+      "甜菜": 10560,
+      "马铃薯": 9108
+    },
+    "stage_counts": {
+      "叶丛快速生长": 1980,
+      "块根膨大": 3366,
+      "块茎形成": 1650,
+      "块茎膨大": 3036,
+      "开花": 1386,
+      "成熟": 4422,
+      "抽雄吐丝": 1386,
+      "拔节大喇叭口": 1980,
+      "灌浆": 4422,
+      "现蕾": 1584,
+      "糖分积累": 2442,
+      "苗期": 11946
+    }
+  }
+}

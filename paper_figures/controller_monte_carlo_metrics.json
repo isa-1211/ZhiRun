@@ -1,0 +1,25 @@
+{
+  "seed": 20260908,
+  "total_scenarios": 14000,
+  "normal": {
+    "n": 10000,
+    "completion_rate": 0.992,
+    "safety_timeout_rate": 0.008,
+    "safety_timeout_count": 80,
+    "outlet_overlap_rate": 0.0,
+    "premature_stop_rate": 0.0,
+    "all_outputs_off_at_end_rate": 1.0,
+    "overshoot_bound_success_rate": 1.0,
+    "max_observed_overshoot_l": 0.07471295830501301
+  },
+  "no_flow_fault": {
+    "n": 2000,
+    "fault_detection_rate": 1.0,
+    "all_outputs_off_rate": 1.0
+  },
+  "emergency_stop": {
+    "n": 2000,
+    "fault_detection_rate": 1.0,
+    "all_outputs_off_rate": 1.0
+  }
+}

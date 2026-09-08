@@ -1,3 +1,5 @@
+import csv
+import json
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 from docx import Document
@@ -160,6 +162,11 @@ def add_table(doc, headers, rows, widths=None):
     table = doc.add_table(rows=1, cols=len(headers))
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table.style = "Table Grid"
+    table.autofit = True
+    header_properties = table.rows[0]._tr.get_or_add_trPr()
+    repeat_header = OxmlElement("w:tblHeader")
+    repeat_header.set(qn("w:val"), "true")
+    header_properties.append(repeat_header)
     hdr = table.rows[0].cells
     for i, h in enumerate(headers):
         hdr[i].text = h; set_cell_shading(hdr[i], "D9EAF7"); hdr[i].vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
@@ -173,6 +180,14 @@ def add_table(doc, headers, rows, widths=None):
     if widths:
         for row in table.rows:
             for i, width in enumerate(widths): row.cells[i].width = Inches(width)
+    for row in table.rows:
+        for cell in row.cells:
+            for paragraph in cell.paragraphs:
+                paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
+                paragraph.paragraph_format.space_after = Pt(0)
+                for run in paragraph.runs:
+                    run.font.name = "Times New Roman"
+                    run.font.size = Pt(9)
     doc.add_paragraph()
     return table
 
@@ -188,6 +203,10 @@ def build():
     fig_ctrl = FIG_DIR / "fig5_controller_trace.png"
     fig_unc = FIG_DIR / "fig6_bootstrap_uncertainty.png"
     fig_mc = FIG_DIR / "fig7_controller_monte_carlo.png"
+    fig_iterations = FIG_DIR / "fig9_iteration_learning_curve.png"
+    iteration_metrics = json.loads((FIG_DIR / "iteration_experiment_metrics.json").read_text(encoding="utf-8"))
+    with (FIG_DIR / "iteration_learning_curve_raw.csv").open(encoding="utf-8-sig", newline="") as handle:
+        iteration_raw = list(csv.DictReader(handle))
     doc = Document(); setup_document(doc)
 
     p = doc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -209,7 +228,7 @@ def build():
     ]: add_para(doc, "- " + item)
 
     doc.add_heading("Abstract", level=1)
-    add_para(doc, "Small and medium farms need fertigation controllers that remain useful when sensors, networks and actuators are imperfect. This paper presents ZhiRun, an edge-cloud fertigation system that combines a Rockchip RK3506B edge node, a public-server inference service and an ESP32-S3 actuator node. A single soil probe supplies moisture, temperature, pH and measured N-P-K values; weather and rain observations are acquired through RS485 sensors and a weather service. The server implements a safety-gated multi-output policy distilled from an explicit crop-stage and weather teacher. An ExtraTrees regressor predicts irrigation water and N, P2O5 and K2O application targets for four crops. Critical soil fields are fail-closed, whereas selected non-critical weather fields can use a regional fallback. At the actuator, each fertilizer pump is paired with a pulse flow meter. The N, P and K channels stop independently when their targets are reached, and the mixing-tank outlet pump is interlocked until all fertilizer channels finish. The generated dataset contains 39,600 policy samples from 2015-2025 weather records; training uses 2015-2022, validation uses 2023, and the independent test uses 2024-2025. On the test split, water, N, P2O5 and K2O R2 values are 0.9805, 0.9230, 0.9254 and 0.9576, respectively, and irrigation decision accuracy is 0.9317. Removing weather or soil features reduced decision accuracy to 0.8003 and 0.5932, while a transparent soil-moisture threshold reference achieved 0.8194. Controller and server regression suites passed 35 tests, and 14,000 controller simulations produced no outlet-fertilizer overlap. These results quantify reproduction of the teacher policy and software safety, not yield improvement. Local yield, water-productivity and fertigation-response trials remain necessary for agronomic validation.")
+    add_para(doc, "Small and medium farms need fertigation controllers that remain useful when sensors, networks and actuators are imperfect. This paper presents ZhiRun, an edge-cloud fertigation system that combines a Rockchip RK3506B edge node, a public-server inference service and an ESP32-S3 actuator node. A single soil probe supplies moisture, temperature, pH and measured N-P-K values; weather and rain observations are acquired through RS485 sensors and a weather service. The server implements a safety-gated multi-output policy distilled from an explicit crop-stage and weather teacher. An ExtraTrees regressor predicts irrigation water and N, P2O5 and K2O application targets for four crops. Critical soil fields are fail-closed, whereas selected non-critical weather fields can use a regional fallback. At the actuator, each fertilizer pump is paired with a pulse flow meter. The N, P and K channels stop independently when their targets are reached, and the mixing-tank outlet pump is interlocked until all fertilizer channels finish. The generated dataset contains 39,600 policy samples from 2015-2025 weather records; training uses 2015-2022, validation uses 2023, and the independent test uses 2024-2025. On the test split, water, N, P2O5 and K2O R2 values are 0.9805, 0.9230, 0.9254 and 0.9576, respectively, and irrigation decision accuracy is 0.9317. Across 25 validation learning-curve runs, increasing training rows from 2,880 to 28,800 raised mean decision accuracy from 0.8666 to 0.9332 and reduced mean water MAE from 0.7593 to 0.3463 m3 mu-1. Removing weather or soil features reduced decision accuracy to 0.8003 and 0.5932, while a transparent soil-moisture threshold reference achieved 0.8194. Controller and server regression suites passed 35 tests, and 14,000 controller simulations produced no outlet-fertilizer overlap. These results quantify reproduction of the teacher policy and software safety, not yield improvement. Local yield, water-productivity and fertigation-response trials remain necessary for agronomic validation.")
     add_para(doc, "Keywords: edge computing; ExtraTrees; fertigation; flow-meter feedback; missing-data safety; precision irrigation")
 
     doc.add_heading("1. Introduction", level=1)
@@ -265,6 +284,8 @@ def build():
     add_para(doc, "To test whether the model depends on the information sources claimed by the architecture, we retrained the same ExtraTrees configuration after removing three feature groups: all weather variables, all soil variables, or all crop-stage and nutrient-budget variables. The ablations use the identical chronological split, target definitions and random seed as the full model. We also evaluated a transparent soil-moisture reference that irrigates when measured moisture is below the stage trigger and assigns the mean positive water event; it never predicts fertilizer. These experiments quantify sensitivity of teacher-policy reproduction and are not evidence of crop response or treatment superiority.")
     doc.add_heading("2.11. Decision-threshold sensitivity and software regression", level=2)
     add_para(doc, "Operational irrigation classification was evaluated against the fixed teacher event definition of at least 0.5 m3 mu-1. The model-output threshold was varied from 0.1 to 2.0 m3 mu-1, and true-positive, false-positive, false-negative and true-negative counts were reported with precision, recall, F1 and specificity. This one-factor analysis tests sensitivity to the execution threshold without refitting the model. In addition, the current single-probe model/controller suite and server quality-gate suite were executed separately from their respective project roots to preserve their import paths.")
+    doc.add_heading("2.12. Repeated training and parameter sensitivity", level=2)
+    add_para(doc, "A repeated learning-curve experiment was conducted to expose model iteration behavior rather than reporting only the selected final fit. The 2015-2022 training pool was sampled at 10%, 25%, 50%, 75% and 100%. Each size was trained with five predetermined seeds (11, 23, 37, 53 and 71), yielding 25 fits; the 2024-2025 test set remained fixed and untouched. Every fit used 350 trees, minimum leaf size 2 and max_features 0.85. A separate 12-run sensitivity grid used all 28,800 training rows and crossed 100, 200, 350 and 500 trees with minimum leaf sizes 1, 2 and 4 at seed 42. These 37 post hoc robustness runs evaluate sample-size and parameter sensitivity; they were not used to search the test set for a replacement production model.")
 
     doc.add_heading("3. Results", level=1)
     doc.add_heading("3.1. Dataset and held-out policy performance", level=2)
@@ -421,10 +442,40 @@ def build():
     ]
     add_para(doc, "[Table 13 near here]")
 
+    doc.add_heading("3.13. Model iteration and learning-curve results", level=2)
+    add_para(doc, "The 25-run learning curve shows that water error and nutrient reproduction improve as more training data are used, while classification performance approaches a plateau. At 2,880 training rows, mean irrigation decision accuracy was 0.8666 +/- 0.0037 and mean water MAE was 0.7593 +/- 0.0175 m3 mu-1. At 28,800 rows, these values were 0.9332 +/- 0.0044 and 0.3463 +/- 0.0167 m3 mu-1. Mean nutrient macro R2 increased from 0.8591 to 0.9649, and its between-seed standard deviation decreased from 0.0130 to 0.0012. Decision accuracy peaked at 0.9357 on average for the 75% subset and changed only slightly at full size, indicating a classification plateau rather than a strictly monotonic trend.")
+    add_para(doc, "The 12-run validation parameter grid produced decision accuracy from 0.9278 to 0.9408, water R2 from 0.9883 to 0.9904 and nutrient macro R2 from 0.9561 to 0.9698. Increasing tree count above 200 yielded only small and non-monotonic changes. Minimum leaf size 4 consistently reduced nutrient macro R2, whereas leaf sizes 1 and 2 provided the strongest nutrient or decision metrics, respectively. The deployed 350-tree, leaf-size-2 configuration remains a defensible stability choice but is not claimed to be uniquely optimal.")
+    learning_summary_headers = ["Training fraction", "Rows", "Runs", "Decision accuracy", "Water MAE", "Water R2", "Nutrient macro R2"]
+    learning_summary_rows = []
+    for row in iteration_metrics["learning_curve_summary"]:
+        learning_summary_rows.append([
+            f'{float(row["fraction"]) * 100:.0f}%', f'{int(row["train_rows"]):,}', str(int(row["runs"])),
+            f'{row["decision_mean"]:.4f} +/- {row["decision_sd"]:.4f}',
+            f'{row["water_mae_mean"]:.4f} +/- {row["water_mae_sd"]:.4f}',
+            f'{row["water_r2_mean"]:.4f} +/- {row["water_r2_sd"]:.4f}',
+            f'{row["nutrient_r2_mean"]:.4f} +/- {row["nutrient_r2_sd"]:.4f}',
+        ])
+    parameter_headers = ["Trees", "Minimum leaf", "Water MAE", "Water R2", "Nutrient macro R2", "Decision accuracy"]
+    parameter_rows = [[
+        str(int(row["n_estimators"])), str(int(row["min_samples_leaf"])), f'{row["water_mae"]:.4f}',
+        f'{row["water_r2"]:.4f}', f'{row["nutrient_macro_r2"]:.4f}', f'{row["decision_accuracy"]:.4f}',
+    ] for row in iteration_metrics["parameter_sensitivity"]]
+    iteration_headers = ["Training fraction", "Seed", "Rows", "Water MAE", "Water R2", "Nutrient macro R2", "Decision accuracy"]
+    iteration_rows = [[
+        f'{float(row["fraction"]) * 100:.0f}%', row["seed"], f'{int(row["train_rows"]):,}',
+        f'{float(row["water_mae"]):.4f}', f'{float(row["water_r2"]):.4f}',
+        f'{float(row["nutrient_macro_r2"]):.4f}', f'{float(row["decision_accuracy"]):.4f}',
+    ] for row in iteration_raw]
+    add_para(doc, "[Table 14 near here]")
+    add_para(doc, "[Table 15 near here]")
+    add_para(doc, "[Table 16 near here]")
+    add_para(doc, "[Figure 9 near here]")
+
     doc.add_heading("4. Discussion", level=1)
     doc.add_heading("4.1. What is innovative in the present system", level=2)
     add_para(doc, "The main contribution is the integration boundary rather than a claim of a new agronomic optimum. The system explicitly assigns different responsibilities to the cloud and edge: the cloud can host a heavier policy model and weather processing, while the edge preserves local visibility and deterministic actuator protection. The single-probe assumption is also explicit. Instead of fabricating layered soil states, the decision path uses the measurements that the deployed hardware can actually provide. This makes the system easier to audit and calibrate in a small farm.")
     add_para(doc, "The second contribution is the combination of policy distillation and safety gates. A transparent teacher policy can be inspected by agronomists, while ExtraTrees provides a compact nonlinear approximation that is practical to serve. The model is never allowed to bypass hard gates. The third contribution is volume-based fertigation closure: relay state is not treated as delivered dose; flow pulses are used to terminate each nutrient channel, and the outlet pump is interlocked with channel completion. This directly addresses a failure mode that is common in timer-only prototypes.")
+    add_para(doc, "The repeated training results strengthen the engineering evidence by showing how performance changes with training-set size and model settings. The reduction in average water error and nutrient-score dispersion supports use of the full chronological training pool, while the classification curve indicates diminishing returns after 75% of the training rows. The small differences among several tree counts and leaf sizes show that the reported result is not dependent on one isolated hyperparameter combination. This robustness concerns reproduction of the encoded teacher policy only.")
 
     doc.add_heading("4.2. Relation to prior work", level=2)
     add_para(doc, "The architecture follows the broader IoT agriculture direction in which distributed sensing, connectivity and analytics support site-specific management. It differs from many proof-of-concept systems by treating data quality and actuation sequencing as first-class control variables. The use of FAO-56 ET0 provides a recognized physical weather feature, but ET0 is used as context for a teacher policy and not as a substitute for local soil-water calibration. The ExtraTrees choice is consistent with its ability to model nonlinear interactions and mixed feature sets without requiring a large neural inference stack at the edge.")
@@ -488,6 +539,12 @@ def build():
     add_table(doc, ablation_headers, ablation_rows)
     doc.add_paragraph("Table 13. Sensitivity of irrigation-event classification to the model-output threshold (teacher event fixed at 0.5 m3 mu-1; n = 7,200).", style="CaptionText")
     add_table(doc, threshold_headers, threshold_rows)
+    doc.add_paragraph("Table 14. Repeated learning-curve results on the fixed 2023 validation set. Values are mean +/- standard deviation across five seeds.", style="CaptionText")
+    add_table(doc, learning_summary_headers, learning_summary_rows)
+    doc.add_paragraph("Table 15. ExtraTrees parameter-sensitivity iterations using all 28,800 training rows and the fixed 3,600-row validation set.", style="CaptionText")
+    add_table(doc, parameter_headers, parameter_rows)
+    doc.add_paragraph("Table 16. Complete learning-curve iteration log for 25 model fits. The 2023 validation set was fixed across runs.", style="CaptionText")
+    add_table(doc, iteration_headers, iteration_rows)
     doc.add_heading("Figures", level=1)
     for caption, figure in [
         ("Figure 1. ZhiRun edge-cloud fertigation architecture. Boxes identify the field sensing, edge acquisition, server inference and ESP32-S3 actuation layers; arrows show the implemented communication paths.", fig_arch),
@@ -498,6 +555,7 @@ def build():
         ("Figure 6. Bootstrap sampling uncertainty for independent-test MAE. Points are bootstrap means and bars are 95% percentile intervals from 1,000 resamples.", fig_unc),
         ("Figure 7. Controller Monte Carlo safety evaluation across 14,000 reproducible scenarios. Normal completion excludes the 80 deliberately bounded safety timeouts; every terminal state turned all outputs off.", fig_mc),
         ("Figure 8. Feature ablation and transparent-reference comparison. Bars show irrigation decision accuracy on the independent test years; labels are generated teacher-policy outcomes, not field treatment outcomes.", FIG_DIR / "fig8_ablation_comparison.png"),
+        ("Figure 9. Repeated learning curves over five training fractions and five random seeds. Error bars show one standard deviation; all iteration evaluations use the fixed 2023 teacher-policy validation set.", fig_iterations),
     ]:
         doc.add_paragraph(caption, style="CaptionText")
         doc.add_picture(str(figure), width=Inches(6.2))

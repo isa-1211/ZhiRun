@@ -1,0 +1,200 @@
+{
+  "evidence_scope": "teacher-policy reproduction on fixed 2023 validation rows",
+  "validation_rows": 3600,
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "learning_curve_summary": [
+    {
+      "fraction": 0.1,
+      "runs": 5,
+      "train_rows": 2880,
+      "decision_mean": 0.8665555555555555,
+      "decision_sd": 0.0036830442319926954,
+      "water_mae_mean": 0.759306855820106,
+      "water_mae_sd": 0.017457683115818627,
+      "water_r2_mean": 0.9729990342710648,
+      "water_r2_sd": 0.0015795394210577913,
+      "nutrient_r2_mean": 0.8591387111125837,
+      "nutrient_r2_sd": 0.013029718115234562
+    },
+    {
+      "fraction": 0.25,
+      "runs": 5,
+      "train_rows": 7200,
+      "decision_mean": 0.896888888888889,
+      "decision_sd": 0.003930334701294223,
+      "water_mae_mean": 0.5309809656084659,
+      "water_mae_sd": 0.0055596099349304534,
+      "water_r2_mean": 0.9822191662891152,
+      "water_r2_sd": 0.0008587883808123007,
+      "nutrient_r2_mean": 0.9183587060692856,
+      "nutrient_r2_sd": 0.0032322449365396744
+    },
+    {
+      "fraction": 0.5,
+      "runs": 5,
+      "train_rows": 14400,
+      "decision_mean": 0.9231111111111112,
+      "decision_sd": 0.006875771561643137,
+      "water_mae_mean": 0.3989699523809525,
+      "water_mae_sd": 0.013474108139469903,
+      "water_r2_mean": 0.9871277008994033,
+      "water_r2_sd": 0.0007026796168518616,
+      "nutrient_r2_mean": 0.9475318186490569,
+      "nutrient_r2_sd": 0.0018699647075202316
+    },
+    {
+      "fraction": 0.75,
+      "runs": 5,
+      "train_rows": 21600,
+      "decision_mean": 0.9357222222222223,
+      "decision_sd": 0.005287272161860091,
+      "water_mae_mean": 0.3639075492063493,
+      "water_mae_sd": 0.007378970261042421,
+      "water_r2_mean": 0.9879569915638188,
+      "water_r2_sd": 0.0006303898087083458,
+      "nutrient_r2_mean": 0.9604069585793109,
+      "nutrient_r2_sd": 0.0023919705653987107
+    },
+    {
+      "fraction": 1.0,
+      "runs": 5,
+      "train_rows": 28800,
+      "decision_mean": 0.9331666666666667,
+      "decision_sd": 0.00438589912231357,
+      "water_mae_mean": 0.3463232738095239,
+      "water_mae_sd": 0.016718033130754803,
+      "water_r2_mean": 0.9889820813829058,
+      "water_r2_sd": 0.0011274664205167756,
+      "nutrient_r2_mean": 0.9649423702565665,
+      "nutrient_r2_sd": 0.0011707090218111167
+    }
+  ],
+  "parameter_sensitivity": [
+    {
+      "n_estimators": 100,
+      "min_samples_leaf": 1,
+      "train_rows": 28800,
+      "water_mae": 0.3051652777777778,
+      "water_r2": 0.9903840832241839,
+      "nutrient_macro_r2": 0.9697937696683363,
+      "decision_accuracy": 0.9372222222222222,
+      "fit_seconds": 0.5403995999949984
+    },
+    {
+      "n_estimators": 100,
+      "min_samples_leaf": 2,
+      "train_rows": 28800,
+      "water_mae": 0.3242113657407408,
+      "water_r2": 0.9888144116069691,
+      "nutrient_macro_r2": 0.9640690470724378,
+      "decision_accuracy": 0.9380555555555555,
+      "fit_seconds": 0.5209642999980133
+    },
+    {
+      "n_estimators": 100,
+      "min_samples_leaf": 4,
+      "train_rows": 28800,
+      "water_mae": 0.3442912725970018,
+      "water_r2": 0.9885329377000429,
+      "nutrient_macro_r2": 0.9561154666122627,
+      "decision_accuracy": 0.9277777777777778,
+      "fit_seconds": 0.5120464999927208
+    },
+    {
+      "n_estimators": 200,
+      "min_samples_leaf": 1,
+      "train_rows": 28800,
+      "water_mae": 0.3125659722222223,
+      "water_r2": 0.9901896501114827,
+      "nutrient_macro_r2": 0.9696665629586864,
+      "decision_accuracy": 0.9408333333333333,
+      "fit_seconds": 0.9976508999825455
+    },
+    {
+      "n_estimators": 200,
+      "min_samples_leaf": 2,
+      "train_rows": 28800,
+      "water_mae": 0.32946008101851854,
+      "water_r2": 0.9896446265530606,
+      "nutrient_macro_r2": 0.9659682823816794,
+      "decision_accuracy": 0.9347222222222222,
+      "fit_seconds": 0.947993999987375
+    },
+    {
+      "n_estimators": 200,
+      "min_samples_leaf": 4,
+      "train_rows": 28800,
+      "water_mae": 0.3473718446318341,
+      "water_r2": 0.9886325473224169,
+      "nutrient_macro_r2": 0.9577195272254402,
+      "decision_accuracy": 0.9358333333333333,
+      "fit_seconds": 0.9026985000236891
+    },
+    {
+      "n_estimators": 350,
+      "min_samples_leaf": 1,
+      "train_rows": 28800,
+      "water_mae": 0.3266996031746032,
+      "water_r2": 0.9898314790864818,
+      "nutrient_macro_r2": 0.9679648257669374,
+      "decision_accuracy": 0.9394444444444444,
+      "fit_seconds": 1.6672071999928448
+    },
+    {
+      "n_estimators": 350,
+      "min_samples_leaf": 2,
+      "train_rows": 28800,
+      "water_mae": 0.33900669312169307,
+      "water_r2": 0.9893224189019116,
+      "nutrient_macro_r2": 0.9660673562218162,
+      "decision_accuracy": 0.9311111111111111,
+      "fit_seconds": 1.5832365999813192
+    },
+    {
+      "n_estimators": 350,
+      "min_samples_leaf": 4,
+      "train_rows": 28800,
+      "water_mae": 0.3528627048689845,
+      "water_r2": 0.9882894181591136,
+      "nutrient_macro_r2": 0.9568815559844256,
+      "decision_accuracy": 0.9386111111111111,
+      "fit_seconds": 1.5324167999788187
+    },
+    {
+      "n_estimators": 500,
+      "min_samples_leaf": 1,
+      "train_rows": 28800,
+      "water_mae": 0.33072477777777753,
+      "water_r2": 0.9897051491423127,
+      "nutrient_macro_r2": 0.9684343397936722,
+      "decision_accuracy": 0.9344444444444444,
+      "fit_seconds": 2.3798477000091225
+    },
+    {
+      "n_estimators": 500,
+      "min_samples_leaf": 2,
+      "train_rows": 28800,
+      "water_mae": 0.33348885185185195,
+      "water_r2": 0.9896093967081844,
+      "nutrient_macro_r2": 0.966728369139427,
+      "decision_accuracy": 0.9358333333333333,
+      "fit_seconds": 2.2306232000119053
+    },
+    {
+      "n_estimators": 500,
+      "min_samples_leaf": 4,
+      "train_rows": 28800,
+      "water_mae": 0.3549753223324514,
+      "water_r2": 0.9885591104787551,
+      "nutrient_macro_r2": 0.9564762352699079,
+      "decision_accuracy": 0.9377777777777778,
+      "fit_seconds": 2.140290700015612
+    }
+  ]
+}

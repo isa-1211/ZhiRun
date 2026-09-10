@@ -88,10 +88,12 @@ Do not commit a real `.env` file, SSH keys, Wi-Fi passwords, device tokens, firm
 ## Accounts and device binding
 
 The public dashboard requires an account and a bound controller before it
-returns farm data or accepts control commands. It supports password login,
-SMS-code login/registration, password reset, and WeChat Open Platform QR
-login. A first-time WeChat identity must verify a phone number; the database
-then keeps exactly one WeChat identity and one phone account linked together.
+returns farm data or accepts control commands. Production can set
+`ZHIRUN_AUTH_MODE=password` to expose only provisioned username/password login
+until SMS and WeChat providers are ready. Full mode supports password login,
+SMS-code login/registration, password reset, and WeChat Open Platform QR login.
+A first-time WeChat identity must verify a phone number; the database then keeps
+exactly one WeChat identity and one phone account linked together.
 
 Open the RK3506B **Network** page to obtain its eight-digit identity code. The
 code expires after 10 minutes and is consumed on first use. Enter it after
@@ -105,6 +107,12 @@ the SMS webhook, WeChat website application, database path, and a stable random
 `ZHIRUN_AUTH_SECRET` in `/etc/zhirun/server.env`; see
 `deploy/server.env.example`. The explicit `ZHIRUN_AUTH_DEV_CODE` fallback is
 only for local testing and must remain empty on a public server.
+
+`tools/deploy_password_auth.py` provisions the initial administrator without
+putting its password in the persistent service environment. Existing passwords
+are never reset automatically. `tools/configure_device_auth.py` generates and
+synchronizes a separate random device token to the server and RK3506B; it never
+reuses the SSH or dashboard password.
 
 ## Verification
 

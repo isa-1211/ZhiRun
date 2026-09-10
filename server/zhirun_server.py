@@ -52,6 +52,9 @@ AUTH_DB_FILE = os.environ.get("ZHIRUN_AUTH_DB", os.path.join(ROOT, ".zhirun_auth
 AUTH_SECRET = os.environ.get("ZHIRUN_AUTH_SECRET", "").strip() or PUSH_TOKEN or "local-development-change-me"
 AUTH_COOKIE_SECURE = os.environ.get("ZHIRUN_AUTH_COOKIE_SECURE", "0").strip().lower() in {"1", "true", "yes"}
 AUTH_DEV_CODE = os.environ.get("ZHIRUN_AUTH_DEV_CODE", "").strip()
+AUTH_MODE = os.environ.get("ZHIRUN_AUTH_MODE", "full").strip().lower()
+if AUTH_MODE not in {"password", "full"}:
+    AUTH_MODE = "full"
 SMS_WEBHOOK = os.environ.get("ZHIRUN_SMS_WEBHOOK", "").strip()
 SMS_WEBHOOK_TOKEN = os.environ.get("ZHIRUN_SMS_WEBHOOK_TOKEN", "").strip()
 WECHAT_APP_ID = os.environ.get("ZHIRUN_WECHAT_APP_ID", "").strip()
@@ -1138,8 +1141,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/auth/config":
             self.send_json(200, {
                 "ok": True,
-                "wechat_enabled": bool(WECHAT_APP_ID and WECHAT_APP_SECRET and WECHAT_REDIRECT_URI),
-                "sms_enabled": bool(SMS_WEBHOOK or AUTH_DEV_CODE),
+                "auth_mode": AUTH_MODE,
+                "wechat_enabled": AUTH_MODE == "full" and bool(WECHAT_APP_ID and WECHAT_APP_SECRET and WECHAT_REDIRECT_URI),
+                "sms_enabled": AUTH_MODE == "full" and bool(SMS_WEBHOOK or AUTH_DEV_CODE),
                 "development_sms": bool(AUTH_DEV_CODE),
             })
             return
@@ -1161,6 +1165,9 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/auth/wechat/start":
+            if AUTH_MODE != "full":
+                self.send_json(403, {"ok": False, "error": "auth_method_disabled", "message": "微信登录暂未开放"})
+                return
             if not (WECHAT_APP_ID and WECHAT_APP_SECRET and WECHAT_REDIRECT_URI):
                 self.send_json(503, {"ok": False, "error": "wechat_not_configured", "message": "微信开放平台尚未配置"})
                 return
@@ -1402,28 +1409,38 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             if path == "/auth/code/request":
+                if AUTH_MODE != "full":
+                    raise AuthError("auth_method_disabled", 403, "验证码登录暂未开放")
                 self.rate_limit("sms", 8, 600)
                 self.send_json(200, AUTH.request_code(obj.get("phone"), str(obj.get("purpose") or "login"), self.client_ip()))
                 return
             if path == "/auth/register":
+                if AUTH_MODE != "full":
+                    raise AuthError("auth_method_disabled", 403, "自主注册暂未开放")
                 self.rate_limit("register")
                 user_id = AUTH.register(obj.get("phone"), obj.get("code"), obj.get("password"))
                 self.complete_login(user_id)
                 return
             if path == "/auth/login/password":
                 self.rate_limit("password-login")
-                self.complete_login(AUTH.login_password(obj.get("phone"), obj.get("password")))
+                self.complete_login(AUTH.login_password(obj.get("account") or obj.get("phone"), obj.get("password")))
                 return
             if path == "/auth/login/code":
+                if AUTH_MODE != "full":
+                    raise AuthError("auth_method_disabled", 403, "验证码登录暂未开放")
                 self.rate_limit("code-login")
                 self.complete_login(AUTH.login_code(obj.get("phone"), obj.get("code")))
                 return
             if path == "/auth/password/reset":
+                if AUTH_MODE != "full":
+                    raise AuthError("auth_method_disabled", 403, "短信找回密码暂未开放")
                 self.rate_limit("password-reset")
                 AUTH.reset_password(obj.get("phone"), obj.get("code"), obj.get("password"))
                 self.send_json(200, {"ok": True})
                 return
             if path == "/auth/wechat/link":
+                if AUTH_MODE != "full":
+                    raise AuthError("auth_method_disabled", 403, "微信登录暂未开放")
                 self.rate_limit("wechat-link")
                 user_id = AUTH.link_pending_wechat(obj.get("pending_token", ""), obj.get("phone"), obj.get("code"))
                 self.complete_login(user_id)

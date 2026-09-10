@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 
 
 PHONE_RE = re.compile(r"^1[3-9]\d{9}$")
+USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{2,31}$")
 PASSWORD_ITERATIONS = 310_000
 SESSION_SECONDS = 30 * 24 * 60 * 60
 CODE_SECONDS = 5 * 60
@@ -121,6 +122,10 @@ class AuthStore:
                 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
                 CREATE INDEX IF NOT EXISTS idx_bindings_user ON device_bindings(user_id);
             """)
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(users)")}
+            if "username" not in columns:
+                db.execute("ALTER TABLE users ADD COLUMN username TEXT")
+            db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username) WHERE username IS NOT NULL")
 
     def _digest(self, *parts) -> str:
         body = "\0".join(str(part) for part in parts).encode("utf-8")
@@ -134,6 +139,13 @@ class AuthStore:
         if not PHONE_RE.fullmatch(phone):
             raise AuthError("invalid_phone", message="请输入有效的中国大陆手机号")
         return phone
+
+    @staticmethod
+    def normalize_username(username) -> str:
+        username = str(username or "").strip()
+        if not USERNAME_RE.fullmatch(username):
+            raise AuthError("invalid_username", message="账号需为 3-32 位字母、数字、点、短横线或下划线，且以字母开头")
+        return username.lower()
 
     @staticmethod
     def validate_password(password) -> str:
@@ -232,15 +244,47 @@ class AuthStore:
             self._set_password(db, user["id"], password, timestamp)
             return int(user["id"])
 
-    def login_password(self, phone, password) -> int:
-        phone = self.normalize_phone(phone)
+    def ensure_password_account(self, username, password, device_id: str = "") -> dict:
+        """Provision an administrator once without resetting existing credentials."""
+        username = self.normalize_username(username)
+        password = self.validate_password(password)
+        timestamp = int(time.time())
+        created = False
         with self._connect() as db:
-            row = db.execute("SELECT * FROM users WHERE phone=?", (phone,)).fetchone()
+            row = db.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+            if not row:
+                cursor = db.execute(
+                    "INSERT INTO users(phone,phone_verified_at,username,created_at,updated_at) VALUES(?,?,?,?,?)",
+                    ("account:" + username, 0, username, timestamp, timestamp),
+                )
+                user_id = int(cursor.lastrowid)
+                self._set_password(db, user_id, password, timestamp)
+                created = True
+            else:
+                user_id = int(row["id"])
+                if row["status"] != "active":
+                    raise AuthError("account_disabled", 403, "账号已停用")
+            if device_id:
+                owner = db.execute("SELECT user_id FROM device_bindings WHERE device_id=?", (device_id,)).fetchone()
+                if not owner:
+                    db.execute(
+                        "INSERT INTO device_bindings(device_id,user_id,role,created_at) VALUES(?,?,?,?)",
+                        (device_id, user_id, "owner", timestamp),
+                    )
+        return {"user_id": user_id, "created": created}
+
+    def login_password(self, identifier, password) -> int:
+        identifier = str(identifier or "").strip()
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM users WHERE username=?", (identifier.lower(),)).fetchone()
+            if not row and PHONE_RE.fullmatch(identifier.replace(" ", "").replace("-", "").removeprefix("+86")):
+                phone = self.normalize_phone(identifier)
+                row = db.execute("SELECT * FROM users WHERE phone=?", (phone,)).fetchone()
         if not row or not row["password_hash"] or row["status"] != "active":
-            raise AuthError("invalid_credentials", 401, "手机号或密码错误")
+            raise AuthError("invalid_credentials", 401, "账号或密码错误")
         digest = self._password_hash(str(password or ""), row["password_salt"], int(row["password_iterations"]))
         if not hmac.compare_digest(digest, row["password_hash"]):
-            raise AuthError("invalid_credentials", 401, "手机号或密码错误")
+            raise AuthError("invalid_credentials", 401, "账号或密码错误")
         return int(row["id"])
 
     def login_code(self, phone, code) -> int:
@@ -278,7 +322,7 @@ class AuthStore:
         token_hash = self._digest("session", token)
         with self._connect() as db:
             row = db.execute(
-                "SELECT s.*,u.phone,u.wechat_openid,u.wechat_nickname,u.status FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=?",
+                "SELECT s.*,u.phone,u.username,u.wechat_openid,u.wechat_nickname,u.status FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=?",
                 (token_hash,),
             ).fetchone()
             if not row or row["status"] != "active" or int(row["expires_at"]) < timestamp:
@@ -299,10 +343,14 @@ class AuthStore:
             bindings = db.execute(
                 "SELECT device_id,role,created_at FROM device_bindings WHERE user_id=? ORDER BY created_at", (user_id,)
             ).fetchall()
+        phone = user["phone"] if not str(user["phone"]).startswith("account:") else ""
+        username = user["username"] or ""
         return {
             "id": int(user["id"]),
-            "phone": user["phone"],
-            "phone_masked": user["phone"][:3] + "****" + user["phone"][-4:],
+            "username": username,
+            "account_label": username or (phone[:3] + "****" + phone[-4:]),
+            "phone": phone,
+            "phone_masked": phone[:3] + "****" + phone[-4:] if phone else "",
             "wechat_linked": bool(user["wechat_openid"]),
             "wechat_nickname": user["wechat_nickname"],
             "devices": [dict(row) for row in bindings],

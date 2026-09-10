@@ -34,6 +34,17 @@ class AuthStoreTests(unittest.TestCase):
         self.store.logout(created["token"])
         self.assertIsNone(self.store.session(created["token"]))
 
+    def test_provisioned_username_account_is_idempotent_and_can_bind_device(self):
+        created = self.store.ensure_password_account("Admin.User", "StrongPass123", "rk-admin")
+        self.assertTrue(created["created"])
+        self.assertEqual(self.store.login_password("admin.user", "StrongPass123"), created["user_id"])
+        self.assertEqual(self.store.device_ids(created["user_id"]), {"rk-admin"})
+        existing = self.store.ensure_password_account("admin.user", "DifferentPass456", "rk-admin")
+        self.assertFalse(existing["created"])
+        self.assertEqual(self.store.login_password("admin.user", "StrongPass123"), created["user_id"])
+        with self.assertRaises(AuthError):
+            self.store.login_password("admin.user", "DifferentPass456")
+
     def test_code_login_creates_account(self):
         self.request("13900139000", "login")
         user_id = self.store.login_code("13900139000", "123456")

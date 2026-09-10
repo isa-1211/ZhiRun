@@ -135,6 +135,24 @@ class AuthHttpTests(unittest.TestCase):
             zhirun_server._devices.pop(other_id, None)
             zhirun_server._latest_by_device.pop(other_id, None)
 
+    def test_provisioned_username_can_use_password_login(self):
+        account = self.auth.ensure_password_account("operator", "OperatorPass123")
+        status, result, headers = self.request(
+            "POST", "/auth/login/password", {"account": "operator", "password": "OperatorPass123"}
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(result["id"], account["user_id"])
+        self.assertEqual(result["account_label"], "operator")
+        self.assertIn("HttpOnly", headers["Set-Cookie"])
+
+    def test_password_mode_disables_self_service_methods(self):
+        with mock.patch.object(zhirun_server, "AUTH_MODE", "password"):
+            status, result, _ = self.request(
+                "POST", "/auth/code/request", {"phone": "13800138009", "purpose": "login"}
+            )
+        self.assertEqual(status, 403)
+        self.assertEqual(result["error"], "auth_method_disabled")
+
 
 if __name__ == "__main__":
     unittest.main()

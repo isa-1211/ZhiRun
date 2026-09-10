@@ -35,6 +35,7 @@ def main():
     )
     sftp = client.open_sftp()
     sftp.put(str(PROJECT / "server" / "zhirun_server.py"), "/tmp/zhirun_server.py.new")
+    sftp.put(str(PROJECT / "server" / "auth_store.py"), "/tmp/zhirun_auth_store.py.new")
     sftp.put(str(PROJECT / "server" / "infer_server.py"), "/tmp/zhirun_infer_server.py.new")
     sftp.put(str(PROJECT / "server" / "index.html"), "/tmp/zhirun_index.html.new")
     sftp.put(
@@ -44,6 +45,7 @@ def main():
     sftp.close()
 
     run(client, "/opt/zhirun/.venv/bin/python -m py_compile /tmp/zhirun_server.py.new")
+    run(client, "/opt/zhirun/.venv/bin/python -m py_compile /tmp/zhirun_auth_store.py.new")
     run(client, "/opt/zhirun/.venv/bin/python -m py_compile /tmp/zhirun_infer_server.py.new")
     run(client, "/opt/zhirun/.venv/bin/python -m py_compile /tmp/zhirun_fertigation_model.py.new")
     run(
@@ -56,6 +58,7 @@ def main():
         "test -n \"$state\" || state=/opt/zhirun/server/.zhirun_state.json; "
         "test ! -e \"$state\" -o -e \"$state.pre-rk3506\" || cp -p \"$state\" \"$state.pre-rk3506\"; "
         "install -o zhirun -g zhirun -m 0644 /tmp/zhirun_server.py.new /opt/zhirun/server/zhirun_server.py; "
+        "install -o zhirun -g zhirun -m 0644 /tmp/zhirun_auth_store.py.new /opt/zhirun/server/auth_store.py; "
         "install -o zhirun -g zhirun -m 0644 /tmp/zhirun_infer_server.py.new /opt/zhirun/server/infer_server.py; "
         "install -o zhirun -g zhirun -m 0644 /tmp/zhirun_index.html.new /opt/zhirun/server/index.html; "
         "install -m 0644 /tmp/zhirun_fertigation_model.py.new '/opt/zhirun/灌溉模型/灌溉模型/scripts/fertigation_model.py'; "
@@ -63,9 +66,10 @@ def main():
         "systemctl is-active zhirun-infer.service; "
         "systemctl is-active zhirun-server.service; "
         "curl -fsS http://127.0.0.1:10001/health; echo; "
-        "curl -fsS http://127.0.0.1:10000/data; echo; "
-        "curl -fsS http://127.0.0.1:10000/api/devices; echo; "
-        "curl -fsS http://127.0.0.1:10000/schema; echo",
+        "token=$(sed -n 's/^ZHIRUN_PUSH_TOKEN=//p' /etc/zhirun/server.env | tail -1); "
+        "curl -fsS -H \"X-Device-Token: $token\" http://127.0.0.1:10000/data; echo; "
+        "curl -fsS -H \"X-Device-Token: $token\" http://127.0.0.1:10000/api/devices; echo; "
+        "curl -fsS -H \"X-Device-Token: $token\" http://127.0.0.1:10000/schema; echo",
         timeout=45,
     )
     client.close()

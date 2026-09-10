@@ -45,6 +45,7 @@ static pid_t model_request_pid = -1;
 static bool model_job_ready;
 static double model_job_targets[4];
 static lv_obj_t *network_label;
+static lv_obj_t *identity_button;
 static lv_obj_t *wifi_scan_label;
 static lv_obj_t *wifi_network_list;
 static lv_obj_t *wifi_ssid_input;
@@ -59,6 +60,8 @@ static lv_obj_t *valve_detail_label;
 static lv_obj_t *pump_state_labels[4];
 static lv_obj_t *valve_action_label;
 static unsigned current_page;
+static char hmi_device_id[96] = "rk3506b-01";
+static char hmi_device_token[192] = "";
 
 #define BOOT_FRAME_FILE "/userdata/zhirun/zhirun_boot_frames.rgb565"
 #define BOOT_AUDIO_FILE "/userdata/zhirun/zhirun_boot_audio.wav"
@@ -74,6 +77,39 @@ static unsigned current_page;
 #define WIFI_CONNECT_STATUS_FILE "/tmp/zhirun_hmi_wifi_connect.status"
 #define MODEL_RESULT_FILE "/tmp/zhirun_hmi_model_result.json"
 #define MODEL_STATUS_FILE "/tmp/zhirun_hmi_model_result.status"
+#define HMI_ENV_FILE "/etc/zhirun-rk3506.env"
+
+static void load_env_value(const char *key, char *output, size_t cap) {
+    FILE *file = fopen(HMI_ENV_FILE, "r");
+    if (!file || !key || !output || cap == 0) {
+        if (file) fclose(file);
+        return;
+    }
+    char line[512], prefix[128];
+    snprintf(prefix, sizeof(prefix), "%s=", key);
+    while (fgets(line, sizeof(line), file)) {
+        if (strncmp(line, prefix, strlen(prefix)) != 0) continue;
+        char *value = line + strlen(prefix);
+        value[strcspn(value, "\r\n")] = 0;
+        if ((*value == '\'' || *value == '\"') && strlen(value) > 1) {
+            char quote = *value++;
+            char *end = strrchr(value, quote);
+            if (end) *end = 0;
+        }
+        snprintf(output, cap, "%s", value);
+        break;
+    }
+    fclose(file);
+}
+
+static void load_hmi_identity(void) {
+    const char *environment_id = getenv("ZHIRUN_DEVICE_ID");
+    const char *environment_token = getenv("ZHIRUN_TOKEN");
+    if (environment_id && *environment_id) snprintf(hmi_device_id, sizeof(hmi_device_id), "%s", environment_id);
+    else load_env_value("ZHIRUN_DEVICE_ID", hmi_device_id, sizeof(hmi_device_id));
+    if (environment_token && *environment_token) snprintf(hmi_device_token, sizeof(hmi_device_token), "%s", environment_token);
+    else load_env_value("ZHIRUN_TOKEN", hmi_device_token, sizeof(hmi_device_token));
+}
 
 static uint8_t *boot_frame_data;
 static lv_image_dsc_t boot_frame_dsc;
@@ -343,7 +379,7 @@ static void start_boot_audio(void) {
 
 static int request_timeout(const char *method, const char *path, const char *body,
                            char *out, size_t cap, int timeout_seconds) {
-    char port[16], message[1024];
+    char port[16], message[2048];
     struct addrinfo hints = {0}, *address = NULL;
     snprintf(port, sizeof(port), "%d", HMI_SERVER_PORT);
     hints.ai_family = AF_INET;
@@ -368,8 +404,10 @@ static int request_timeout(const char *method, const char *path, const char *bod
     int length = snprintf(
         message, sizeof(message),
         "%s %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n"
-        "Content-Type: application/json\r\nContent-Length: %zu\r\n\r\n%s",
-        method, path, HMI_SERVER_HOST, body ? strlen(body) : 0, body ? body : "");
+        "Content-Type: application/json\r\nX-Device-Token: %s\r\n"
+        "X-ZhiRun-Device: %s\r\nContent-Length: %zu\r\n\r\n%s",
+        method, path, HMI_SERVER_HOST, hmi_device_token, hmi_device_id,
+        body ? strlen(body) : 0, body ? body : "");
     if (length < 0 || (size_t)length >= sizeof(message) ||
         send(fd, message, (size_t)length, 0) < 0) {
         close(fd);
@@ -909,12 +947,43 @@ static void refresh(lv_timer_t *timer) {
         }
     }
     if (network_label) {
-        char network_text[320];
-        snprintf(network_text, sizeof(network_text), "Server: http://%s:%d\nWi-Fi or Ethernet supported\nUSB insertion order is independent",
-                 HMI_SERVER_HOST, HMI_SERVER_PORT);
+        char network_text[480], identity_response[1024], identity_code[16] = "";
+        bool bound = false;
+        char identity_path[192];
+        snprintf(identity_path, sizeof(identity_path), "/device/identity?device_id=%s", hmi_device_id);
+        if (request("GET", identity_path, NULL, identity_response, sizeof(identity_response)) == 0) {
+            json_boolean(identity_response, "bound", &bound);
+            json_string(identity_response, "code", identity_code, sizeof(identity_code));
+        }
+        snprintf(network_text, sizeof(network_text),
+                 "Server: http://%s:%d | Device: %s\n%s%s%s\nWi-Fi or Ethernet supported | USB order independent",
+                 HMI_SERVER_HOST, HMI_SERVER_PORT, hmi_device_id,
+                 bound ? "Identity: BOUND" : "Identity code: ",
+                 bound ? "" : (identity_code[0] ? identity_code : "unavailable"),
+                 bound ? "" : " (valid 10 min)");
         lv_label_set_text(network_label, network_text);
+        if (identity_button) {
+            if (bound) lv_obj_add_state(identity_button, LV_STATE_DISABLED);
+            else lv_obj_clear_state(identity_button, LV_STATE_DISABLED);
+        }
     }
     fprintf(stderr, "HMI_REFRESH complete\n");
+}
+
+static void rotate_identity(lv_event_t *event) {
+    (void)event;
+    char body[180], response[1024], code[16] = "";
+    snprintf(body, sizeof(body), "{\"device_id\":\"%s\"}", hmi_device_id);
+    if (request("POST", "/device/identity/rotate", body, response, sizeof(response)) == 0 &&
+        json_string(response, "code", code, sizeof(code))) {
+        char text[480];
+        snprintf(text, sizeof(text),
+                 "Server: http://%s:%d | Device: %s\nIdentity code: %s (valid 10 min)\nWi-Fi or Ethernet supported | USB order independent",
+                 HMI_SERVER_HOST, HMI_SERVER_PORT, hmi_device_id, code);
+        lv_label_set_text(network_label, text);
+    } else {
+        lv_label_set_text(network_label, "Identity code refresh failed; check server connection and device token");
+    }
 }
 
 static void stop_pump(lv_event_t *event) {
@@ -1213,7 +1282,14 @@ static void build_dashboard(void) {
     lv_label_set_text(model_stop_label, "STOP ALL");
     lv_obj_center(model_stop_label);
 
-    network_label = page_text(pages[4], "Local Wi-Fi: checking...", 7, 7, 740);
+    network_label = page_text(pages[4], "Local Wi-Fi: checking...", 7, 7, 600);
+    identity_button = lv_btn_create(pages[4]);
+    lv_obj_set_pos(identity_button, 620, 5);
+    lv_obj_set_size(identity_button, 145, 42);
+    lv_obj_add_event_cb(identity_button, rotate_identity, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *identity_button_label = lv_label_create(identity_button);
+    lv_label_set_text(identity_button_label, "NEW CODE");
+    lv_obj_center(identity_button_label);
 
     wifi_ssid_input = lv_textarea_create(pages[4]);
     lv_obj_set_pos(wifi_ssid_input, 7, 72);
@@ -1372,6 +1448,7 @@ static void show_boot_screen(void) {
 }
 
 int main(void) {
+    load_hmi_identity();
     lv_port_init(0, 0, 0);
     show_boot_screen();
     while (1) {

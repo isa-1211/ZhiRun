@@ -43,12 +43,12 @@ def run(command):
     return output
 
 
-for name in ("index.html", "zhirun_server.py"):
+for name in ("index.html", "zhirun_server.py", "auth_store.py"):
     remote = posixpath.join(REMOTE_DIR, name)
-    run(f"cp {remote} {remote}.before-weather-fallback-{STAMP}")
+    run(f"test ! -e {remote} || cp {remote} {remote}.before-auth-{STAMP}")
 
 sftp = ssh.open_sftp()
-for name in ("index.html", "zhirun_server.py"):
+for name in ("index.html", "zhirun_server.py", "auth_store.py"):
     local = os.path.join(LOCAL_SERVER, name)
     remote = posixpath.join(REMOTE_DIR, name)
     sftp.put(local, remote)

@@ -56,19 +56,36 @@ def run(cmd):
 
 # --- 1. 上传文件到用户家目录 ---
 sftp = ssh.open_sftp()
-for fn in ["index.html", "zhirun_server.py"]:
+for fn in ["index.html", "zhirun_server.py", "auth_store.py"]:
     local = os.path.join(SERVER_DIR, fn)
     sftp.put(local, fn)  # 相对路径 = 家目录
     print("uploaded", fn, os.path.getsize(local), "bytes")
 
 # 生成用户级 systemd 服务文件 (替换 token / port 占位符)
 with open(os.path.join(DEPLOY_DIR, "zhirun.service"), "r") as f:
-    svc = f.read().replace("__TOKEN__", TOKEN).replace("__PORT__", PORT)
+    svc = (f.read()
+           .replace("__TOKEN__", TOKEN)
+           .replace("__PORT__", PORT)
+           .replace("__AUTH_SECRET__", os.environ.get("ZHIRUN_AUTH_SECRET", TOKEN)))
 
 run("mkdir -p ~/.config/systemd/user")
 svc_remote = ".config/systemd/user/zhirun.service"
 with sftp.open(svc_remote, "w") as f:
     f.write(svc)
+auth_keys = [
+    "ZHIRUN_AUTH_SECRET", "ZHIRUN_AUTH_DB", "ZHIRUN_AUTH_COOKIE_SECURE",
+    "ZHIRUN_SMS_WEBHOOK", "ZHIRUN_SMS_WEBHOOK_TOKEN", "ZHIRUN_AUTH_DEV_CODE",
+    "ZHIRUN_WECHAT_APP_ID", "ZHIRUN_WECHAT_APP_SECRET", "ZHIRUN_WECHAT_REDIRECT_URI",
+]
+auth_lines = []
+for key in auth_keys:
+    value = os.environ.get(key, "")
+    if "\n" in value or "\r" in value:
+        sys.exit(f"{key} 不能包含换行符")
+    auth_lines.append(f'{key}="{value.replace(chr(92), chr(92) * 2).replace(chr(34), chr(92) + chr(34))}"')
+with sftp.open(".zhirun-auth.env", "w") as f:
+    f.write("\n".join(auth_lines) + "\n")
+sftp.chmod(".zhirun-auth.env", 0o600)
 sftp.close()
 print("uploaded user-level zhirun.service")
 

@@ -9,7 +9,9 @@ ExecStart=/usr/bin/python3 %h/zhirun_server.py
 Restart=always
 RestartSec=3
 Environment=ZHIRUN_PUSH_TOKEN=__TOKEN__
+Environment=ZHIRUN_AUTH_SECRET=__AUTH_SECRET__
 Environment=ZHIRUN_PORT=__PORT__
+EnvironmentFile=-%h/.zhirun-auth.env
 
 [Install]
 WantedBy=default.target

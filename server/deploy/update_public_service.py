@@ -26,6 +26,7 @@ ssh.connect(host, username=user, password=password, timeout=20)
 with ssh.open_sftp() as sftp:
     sftp.put(str(ROOT / "server" / "index.html"), "/home/lijing/index.html")
     sftp.put(str(ROOT / "server" / "zhirun_server.py"), "/home/lijing/zhirun_server.py")
+    sftp.put(str(ROOT / "server" / "auth_store.py"), "/home/lijing/auth_store.py")
 
 _, stdout, stderr = ssh.exec_command("systemctl restart zhirun.service && systemctl is-active zhirun.service")
 status = stdout.read().decode("utf-8", "ignore").strip()

@@ -17,6 +17,8 @@ important parts of the web frontend without running a browser:
   in the touch list, enter its password with the on-screen keyboard, and
   connect without the server. Open networks can be connected without a
   password; the list and page can be scrolled on the 800x480 display.
+- an eight-digit, 10-minute device identity code on the Network page for
+  binding a phone/computer account; `NEW CODE` rotates an unbound code.
 
 The full model remains on the server. The board uses `/data`, `/weather`, and
 `/valve/config` for status. Its Model page requests the existing
@@ -54,6 +56,11 @@ after the binary has been verified manually:
 The default model/API host is `8.145.49.45:80`. Override it at compile
 time with `-DHMI_SERVER_HOST=\"your.server.ip\"` and
 `-DHMI_SERVER_PORT=80`.
+
+The HMI reads `ZHIRUN_DEVICE_ID` and `ZHIRUN_TOKEN` from
+`/etc/zhirun-rk3506.env` (or process environment variables) and sends them as
+device headers. The token must match the server's `ZHIRUN_PUSH_TOKEN`; it is
+not embedded in the executable.
 
 The board boot service plays the visual RGB565 frame sequence and matching PCM WAV
 derived from `assets/zhirun_boot_animation.mp4` before starting this application.

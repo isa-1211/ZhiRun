@@ -16,8 +16,15 @@ systemctl enable --now zhirun-server.service zhirun-infer.service
 ```
 
 Install `deploy/nginx-zhirun.conf` as an Nginx site so the board can use the
-standard HTTP port. Set `ZHIRUN_PUSH_TOKEN` in `/etc/zhirun/server.env` when
-upload authentication is required.
+standard HTTP port. Set a non-empty `ZHIRUN_PUSH_TOKEN` in
+`/etc/zhirun/server.env`; device upload and binding-code access are rejected
+when it is absent.
+
+Copy the account configuration from `deploy/server.env.example` into the same
+file. Production login additionally requires an SMS delivery webhook and an
+approved WeChat Open Platform website application. Use HTTPS and set
+`ZHIRUN_AUTH_COOKIE_SECURE=1` before exposing account login publicly. Preserve
+the configured SQLite database across deployments and include it in backups.
 
 ## RK3506B controller
 

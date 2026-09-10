@@ -6,6 +6,8 @@
 实时数据页 /data、字段布局 /schema、设备状态 /config 与历史缓存。
 """
 import io
+from http.cookies import SimpleCookie
+import hmac
 import json
 import math
 import os
@@ -17,6 +19,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 from urllib.request import Request, urlopen
 from xml.sax.saxutils import escape
+
+try:
+    from .auth_store import AuthError, AuthStore, exchange_wechat_code, wechat_authorize_url
+except ImportError:  # Direct execution: python server/zhirun_server.py
+    from auth_store import AuthError, AuthStore, exchange_wechat_code, wechat_authorize_url
 
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -41,6 +48,15 @@ load_local_env()
 PORT = int(os.environ.get("ZHIRUN_PORT", "10000"))
 PUSH_TOKEN = os.environ.get("ZHIRUN_PUSH_TOKEN", "").strip()
 STATE_FILE = os.environ.get("ZHIRUN_STATE_FILE", os.path.join(ROOT, ".zhirun_state.json"))
+AUTH_DB_FILE = os.environ.get("ZHIRUN_AUTH_DB", os.path.join(ROOT, ".zhirun_auth.sqlite3"))
+AUTH_SECRET = os.environ.get("ZHIRUN_AUTH_SECRET", "").strip() or PUSH_TOKEN or "local-development-change-me"
+AUTH_COOKIE_SECURE = os.environ.get("ZHIRUN_AUTH_COOKIE_SECURE", "0").strip().lower() in {"1", "true", "yes"}
+AUTH_DEV_CODE = os.environ.get("ZHIRUN_AUTH_DEV_CODE", "").strip()
+SMS_WEBHOOK = os.environ.get("ZHIRUN_SMS_WEBHOOK", "").strip()
+SMS_WEBHOOK_TOKEN = os.environ.get("ZHIRUN_SMS_WEBHOOK_TOKEN", "").strip()
+WECHAT_APP_ID = os.environ.get("ZHIRUN_WECHAT_APP_ID", "").strip()
+WECHAT_APP_SECRET = os.environ.get("ZHIRUN_WECHAT_APP_SECRET", "").strip()
+WECHAT_REDIRECT_URI = os.environ.get("ZHIRUN_WECHAT_REDIRECT_URI", "").strip()
 REALTIME_SOURCE = os.environ.get("ZHIRUN_REALTIME_SOURCE", "").strip().lower()
 REALTIME_DEVICE_ID = os.environ.get("ZHIRUN_REALTIME_DEVICE_ID", "").strip()
 WEATHER_FALLBACK_LATITUDE = float(os.environ.get("ZHIRUN_WEATHER_FALLBACK_LATITUDE", "40.82"))
@@ -89,6 +105,10 @@ FIXED_KEYS = [f["key"] for f in FIXED_FIELDS]
 
 # 翻斗原始计数只用于计算雨量, 不作为独立参数展示。
 IGNORE_KEYS = {"rainTips"}
+
+AUTH = AuthStore(AUTH_DB_FILE, AUTH_SECRET, SMS_WEBHOOK, SMS_WEBHOOK_TOKEN, AUTH_DEV_CODE)
+_auth_attempts = {}
+_request_scope = threading.local()
 
 
 def resolve_fields(device, latest):
@@ -527,16 +547,21 @@ def device_online(device):
 
 def current_device_id(requested_device_id=None):
     """Return the device selected for the public realtime page."""
+    allowed = getattr(_request_scope, "allowed_device_ids", None)
     if requested_device_id:
-        return safe_device_id(requested_device_id)
-    if REALTIME_DEVICE_ID:
+        selected = safe_device_id(requested_device_id)
+        return selected if allowed is None or selected in allowed else None
+    preferred = getattr(_request_scope, "preferred_device_id", None)
+    if preferred and (allowed is None or preferred in allowed):
+        return preferred
+    if REALTIME_DEVICE_ID and (allowed is None or safe_device_id(REALTIME_DEVICE_ID) in allowed):
         return safe_device_id(REALTIME_DEVICE_ID)
     # The RK3506B edge controller reports directly to /push. The public page
     # selects it unless a specific source/device is explicitly configured.
     allowed_sources = {REALTIME_SOURCE} if REALTIME_SOURCE else {"rk3506"}
     candidates = [
         device_id for device_id, device in _devices.items()
-        if device.get("source") in allowed_sources
+        if device.get("source") in allowed_sources and (allowed is None or device_id in allowed)
     ]
     if not candidates:
         return None
@@ -545,10 +570,16 @@ def current_device_id(requested_device_id=None):
 
 def current_valve_device_id():
     """Prefer the RK3506B edge relay controller when it is online."""
+    allowed = getattr(_request_scope, "allowed_device_ids", None)
+    preferred = getattr(_request_scope, "preferred_device_id", None)
+    if (preferred and (allowed is None or preferred in allowed)
+            and "valve_control" in (_devices.get(preferred, {}).get("capabilities") or [])):
+        return preferred
     candidates = [
         device_id for device_id, device in _devices.items()
         if "valve_control" in (device.get("capabilities") or [])
         and device_online(_latest_by_device.get(device_id, {}))
+        and (allowed is None or device_id in allowed)
     ]
     if candidates:
         rk3506_candidates = [
@@ -646,8 +677,6 @@ def strip_auth(obj):
 
 
 def authorized(obj, device_id=None):
-    if not PUSH_TOKEN:
-        return True
     supplied = str((obj or {}).get("token") or (obj or {}).get("device_token") or "")
     if supplied and supplied == PUSH_TOKEN:
         return True
@@ -919,16 +948,121 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
 
-    def send_json(self, code, value):
+    def send_json(self, code, value, headers=None):
         body = json_bytes(value)
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token, X-ZhiRun-Device, X-Device-Token")
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        for key, header_value in (headers or {}).items():
+            self.send_header(key, header_value)
         self.end_headers()
         self.wfile.write(body)
+
+    def client_ip(self):
+        peer = self.client_address[0]
+        if peer not in {"127.0.0.1", "::1"}:
+            return peer
+        real_ip = self.headers.get("X-Real-IP", "").strip()
+        forwarded = self.headers.get("X-Forwarded-For", "").split(",")[-1].strip()
+        return real_ip or forwarded or peer
+
+    def cookie_value(self, name):
+        cookie = SimpleCookie()
+        try:
+            cookie.load(self.headers.get("Cookie", ""))
+            return cookie[name].value if name in cookie else None
+        except Exception:
+            return None
+
+    def auth_session(self):
+        return AUTH.session(self.cookie_value("zhirun_session"))
+
+    def session_cookie(self, token, max_age=30 * 24 * 60 * 60):
+        secure = "; Secure" if AUTH_COOKIE_SECURE else ""
+        return f"zhirun_session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax{secure}"
+
+    def require_user(self, device_required=False):
+        session = self.auth_session()
+        if not session:
+            self.send_json(401, {"ok": False, "error": "authentication_required"})
+            return None
+        if self.command not in {"GET", "HEAD", "OPTIONS"}:
+            supplied = self.headers.get("X-CSRF-Token", "")
+            if not supplied or not hmac.compare_digest(supplied, session["csrf_token"]):
+                self.send_json(403, {"ok": False, "error": "csrf_failed"})
+                return None
+        if device_required and not AUTH.device_ids(int(session["user_id"])):
+            self.send_json(403, {"ok": False, "error": "device_binding_required"})
+            return None
+        return session
+
+    def user_device_id(self, session, requested=None, require_online=False):
+        allowed = AUTH.device_ids(int(session["user_id"]))
+        requested = safe_device_id(requested) if requested else None
+        if requested:
+            return requested if requested in allowed else None
+        candidates = [device_id for device_id in allowed if device_id in _devices or device_id in _latest_by_device]
+        if require_online:
+            candidates = [device_id for device_id in candidates if device_online(_latest_by_device.get(device_id, {}))]
+        if not candidates:
+            return next(iter(sorted(allowed)), None)
+        return max(candidates, key=lambda device_id: _latest_by_device.get(device_id, {}).get("_ts", 0))
+
+    def rate_limit(self, scope, limit=10, window=300):
+        key = (scope, self.client_ip())
+        timestamp = now()
+        with _lock:
+            attempts = [value for value in _auth_attempts.get(key, []) if timestamp - value < window]
+            if len(attempts) >= limit:
+                raise AuthError("too_many_attempts", 429, "操作过于频繁，请稍后再试")
+            attempts.append(timestamp)
+            _auth_attempts[key] = attempts
+
+    def complete_login(self, user_id):
+        session = AUTH.create_session(user_id, self.headers.get("User-Agent", ""), self.client_ip())
+        payload = AUTH.user_payload(user_id)
+        payload.update({"ok": True, "csrf_token": session["csrf_token"], "expires_at": session["expires_at"]})
+        self.send_json(200, payload, {"Set-Cookie": self.session_cookie(session["token"])})
+
+    def device_authenticated(self, obj=None, query=None):
+        query = query or {}
+        supplied = (self.headers.get("X-Device-Token", "")
+                    or query.get("device_token", [""])[0]
+                    or query.get("token", [""])[0])
+        if not supplied and isinstance(obj, dict):
+            supplied = obj.get("token") or obj.get("device_token") or ""
+        requested = (obj or {}).get("device_id") if isinstance(obj, dict) else None
+        if not requested:
+            requested = query.get("device_id", [None])[0]
+        if not requested:
+            requested = self.headers.get("X-ZhiRun-Device", "")
+        path = urlparse(self.path).path
+        if not requested and path.startswith("/api/devices/"):
+            parts = path.split("/")
+            requested = unquote(parts[3]) if len(parts) > 3 else None
+        requested = safe_device_id(requested) if requested else None
+        authenticated = bool(supplied and authorized({"token": supplied}, requested))
+        if authenticated and requested:
+            _request_scope.allowed_device_ids = {requested}
+            _request_scope.preferred_device_id = requested
+        return authenticated
+
+    def activate_user_scope(self, session):
+        allowed = AUTH.device_ids(int(session["user_id"]))
+        _request_scope.allowed_device_ids = allowed
+        requested = safe_device_id(self.headers.get("X-ZhiRun-Device", ""))
+        _request_scope.preferred_device_id = requested if requested in allowed else None
+
+    def send_redirect(self, location, headers=None):
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
+        self.end_headers()
 
     def send_text(self, code, text):
         body = text.encode("utf-8")
@@ -961,7 +1095,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token, X-ZhiRun-Device, X-Device-Token")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
         self.send_header("Content-Length", "0")
         self.end_headers()
@@ -981,6 +1115,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(502, {"ok": False, "error": "fertigation_service_unavailable", "message": str(exc)})
 
     def do_GET(self):
+        _request_scope.allowed_device_ids = None
+        _request_scope.preferred_device_id = None
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
         query = parse_qs(parsed.query)
@@ -998,6 +1134,72 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 self.send_text(404, "index.html 未找到")
             return
+
+        if path == "/auth/config":
+            self.send_json(200, {
+                "ok": True,
+                "wechat_enabled": bool(WECHAT_APP_ID and WECHAT_APP_SECRET and WECHAT_REDIRECT_URI),
+                "sms_enabled": bool(SMS_WEBHOOK or AUTH_DEV_CODE),
+                "development_sms": bool(AUTH_DEV_CODE),
+            })
+            return
+
+        if path == "/favicon.ico":
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        if path == "/auth/me":
+            session = self.auth_session()
+            if not session:
+                self.send_json(200, {"ok": True, "authenticated": False})
+                return
+            payload = AUTH.user_payload(int(session["user_id"]))
+            payload.update({"ok": True, "authenticated": True, "csrf_token": session["csrf_token"]})
+            self.send_json(200, payload)
+            return
+
+        if path == "/auth/wechat/start":
+            if not (WECHAT_APP_ID and WECHAT_APP_SECRET and WECHAT_REDIRECT_URI):
+                self.send_json(503, {"ok": False, "error": "wechat_not_configured", "message": "微信开放平台尚未配置"})
+                return
+            state = AUTH.create_wechat_state("login")
+            self.send_json(200, {"ok": True, "authorize_url": wechat_authorize_url(WECHAT_APP_ID, WECHAT_REDIRECT_URI, state)})
+            return
+
+        if path == "/auth/wechat/callback":
+            try:
+                AUTH.consume_wechat_state(query.get("state", [""])[0])
+                profile = exchange_wechat_code(WECHAT_APP_ID, WECHAT_APP_SECRET, query.get("code", [""])[0])
+                result = AUTH.resolve_wechat(**profile)
+                if result["user_id"]:
+                    login = AUTH.create_session(result["user_id"], self.headers.get("User-Agent", ""), self.client_ip())
+                    self.send_redirect("/?wechat=success", {"Set-Cookie": self.session_cookie(login["token"])})
+                else:
+                    self.send_redirect("/?wechat_pending=" + result["pending_token"])
+            except AuthError as exc:
+                self.send_redirect("/?wechat_error=" + exc.code)
+            except Exception:
+                self.send_redirect("/?wechat_error=wechat_unavailable")
+            return
+
+        if path == "/device/identity":
+            if not self.device_authenticated(query=query):
+                self.send_json(401, {"ok": False, "error": "device_authentication_required"})
+                return
+            with _lock:
+                device_id = current_device_id(query.get("device_id", [None])[0])
+                exists = bool(device_id and (device_id in _devices or device_id in _latest_by_device))
+            self.send_json(200, AUTH.identity_code(device_id) if exists else {"ok": False, "error": "device_not_found"})
+            return
+
+        device_request = self.device_authenticated(query=query)
+        if not device_request:
+            session = self.require_user(device_required=True)
+            if not session:
+                return
+            self.activate_user_scope(session)
 
         if path == "/data":
             requested_device_id = query.get("device_id", [None])[0]
@@ -1149,7 +1351,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/devices":
             with _lock:
-                devices = [device_snapshot(device_id) for device_id in sorted(_devices)]
+                allowed = getattr(_request_scope, "allowed_device_ids", None)
+                devices = [device_snapshot(device_id) for device_id in sorted(_devices) if allowed is None or device_id in allowed]
             devices.sort(key=lambda item: item.get("last_seen", 0), reverse=True)
             self.send_json(200, {"devices": devices, "count": len(devices), "mode": "local"})
             return
@@ -1160,6 +1363,10 @@ class Handler(BaseHTTPRequestHandler):
                 device_id = unquote(parts[3])
                 suffix = "/".join(parts[4:])
                 with _lock:
+                    allowed = getattr(_request_scope, "allowed_device_ids", None)
+                    if allowed is not None and device_id not in allowed:
+                        self.send_json(403, {"error": "device_not_bound"})
+                        return
                     if device_id not in _devices and device_id not in _latest_by_device:
                         self.send_json(404, {"error": "device_not_found"})
                         return
@@ -1184,12 +1391,84 @@ class Handler(BaseHTTPRequestHandler):
         self.send_text(404, "not found")
 
     def do_POST(self):
+        _request_scope.allowed_device_ids = None
+        _request_scope.preferred_device_id = None
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
         obj = self.read_json()
         if obj is None:
             self.send_json(400, {"error": "bad_json"})
             return
+
+        try:
+            if path == "/auth/code/request":
+                self.rate_limit("sms", 8, 600)
+                self.send_json(200, AUTH.request_code(obj.get("phone"), str(obj.get("purpose") or "login"), self.client_ip()))
+                return
+            if path == "/auth/register":
+                self.rate_limit("register")
+                user_id = AUTH.register(obj.get("phone"), obj.get("code"), obj.get("password"))
+                self.complete_login(user_id)
+                return
+            if path == "/auth/login/password":
+                self.rate_limit("password-login")
+                self.complete_login(AUTH.login_password(obj.get("phone"), obj.get("password")))
+                return
+            if path == "/auth/login/code":
+                self.rate_limit("code-login")
+                self.complete_login(AUTH.login_code(obj.get("phone"), obj.get("code")))
+                return
+            if path == "/auth/password/reset":
+                self.rate_limit("password-reset")
+                AUTH.reset_password(obj.get("phone"), obj.get("code"), obj.get("password"))
+                self.send_json(200, {"ok": True})
+                return
+            if path == "/auth/wechat/link":
+                self.rate_limit("wechat-link")
+                user_id = AUTH.link_pending_wechat(obj.get("pending_token", ""), obj.get("phone"), obj.get("code"))
+                self.complete_login(user_id)
+                return
+            if path == "/auth/logout":
+                session = self.require_user()
+                if not session:
+                    return
+                AUTH.logout(self.cookie_value("zhirun_session"))
+                self.send_json(200, {"ok": True}, {"Set-Cookie": self.session_cookie("", 0)})
+                return
+            if path == "/auth/device/bind":
+                session = self.require_user()
+                if not session:
+                    return
+                device_id = AUTH.bind_device(int(session["user_id"]), obj.get("code"))
+                self.send_json(200, {"ok": True, "device_id": device_id, "user": AUTH.user_payload(int(session["user_id"]))})
+                return
+            if path == "/auth/device/unbind":
+                session = self.require_user(device_required=True)
+                if not session:
+                    return
+                AUTH.unbind_device(int(session["user_id"]), safe_device_id(obj.get("device_id")))
+                self.send_json(200, {"ok": True, "user": AUTH.user_payload(int(session["user_id"]))})
+                return
+            if path == "/device/identity/rotate":
+                if not self.device_authenticated(obj=obj):
+                    self.send_json(401, {"ok": False, "error": "device_authentication_required"})
+                    return
+                device_id = safe_device_id(obj.get("device_id") or current_device_id())
+                with _lock:
+                    if not device_id or (device_id not in _devices and device_id not in _latest_by_device):
+                        self.send_json(404, {"ok": False, "error": "device_not_found"})
+                        return
+                self.send_json(200, AUTH.identity_code(device_id, rotate=True))
+                return
+        except AuthError as exc:
+            self.send_json(exc.status, {"ok": False, "error": exc.code, "message": exc.message})
+            return
+
+        if not self.device_authenticated(obj=obj):
+            session = self.require_user(device_required=True)
+            if not session:
+                return
+            self.activate_user_scope(session)
 
         if path == "/fertigation/auto/crop":
             crop = str(obj.get("crop") or "").strip()
@@ -1458,6 +1737,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_text(404, "not found")
 
     def do_PATCH(self):
+        _request_scope.allowed_device_ids = None
+        _request_scope.preferred_device_id = None
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
         if not path.startswith("/api/devices/"):
@@ -1467,6 +1748,13 @@ class Handler(BaseHTTPRequestHandler):
         obj = self.read_json()
         if obj is None:
             self.send_json(400, {"error": "bad_json"})
+            return
+        session = self.require_user(device_required=True)
+        if not session:
+            return
+        self.activate_user_scope(session)
+        if device_id not in AUTH.device_ids(int(session["user_id"])):
+            self.send_json(403, {"error": "device_not_bound"})
             return
         with _lock:
             if device_id not in _devices:
@@ -1480,6 +1768,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    if not PUSH_TOKEN:
+        print("警告: ZHIRUN_PUSH_TOKEN 未配置，板端上报和设备身份码接口将拒绝访问", file=sys.stderr)
+    if AUTH_SECRET == "local-development-change-me":
+        print("警告: ZHIRUN_AUTH_SECRET 未配置，仅可用于本地开发", file=sys.stderr)
     save_thread = threading.Thread(target=_save_loop, name="state-saver", daemon=True)
     save_thread.start()
     if AUTO_MODEL_ENABLED:

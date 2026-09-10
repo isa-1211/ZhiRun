@@ -54,7 +54,8 @@ python server/zhirun_server.py
    on the board, then enable the init script. The model is deployed only on
    the public server using `deploy/zhirun-infer.service`.
 
-The RK3506B configuration must set `ZHIRUN_SERVER` to the public service.
+The RK3506B configuration must set `ZHIRUN_SERVER` to the public service and
+its non-empty `ZHIRUN_TOKEN` must match the server's `ZHIRUN_PUSH_TOKEN`.
 Verify the runtime route with:
 
 ```bash
@@ -84,9 +85,32 @@ it can recover after reboot.
 
 Do not commit a real `.env` file, SSH keys, Wi-Fi passwords, device tokens, firmware images, or PlatformIO `.pio` build directories. The `.gitignore` excludes these paths by default.
 
+## Accounts and device binding
+
+The public dashboard requires an account and a bound controller before it
+returns farm data or accepts control commands. It supports password login,
+SMS-code login/registration, password reset, and WeChat Open Platform QR
+login. A first-time WeChat identity must verify a phone number; the database
+then keeps exactly one WeChat identity and one phone account linked together.
+
+Open the RK3506B **Network** page to obtain its eight-digit identity code. The
+code expires after 10 minutes and is consumed on first use. Enter it after
+login to bind the controller. One controller has one owner; after unbinding,
+the old code is invalid and the board generates a new one.
+
+Authentication data is stored in SQLite outside the telemetry state file.
+Passwords use salted PBKDF2-HMAC-SHA256, browser sessions are opaque HttpOnly
+cookies, and state-changing browser requests require a CSRF token. Configure
+the SMS webhook, WeChat website application, database path, and a stable random
+`ZHIRUN_AUTH_SECRET` in `/etc/zhirun/server.env`; see
+`deploy/server.env.example`. The explicit `ZHIRUN_AUTH_DEV_CODE` fallback is
+only for local testing and must remain empty on a public server.
+
 ## Verification
 
 ```powershell
 cd "灌溉模型/灌溉模型"
 python -m pytest tests
+cd ../..
+python -m unittest discover -s server/tests -v
 ```

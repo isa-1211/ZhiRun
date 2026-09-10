@@ -46,6 +46,7 @@ static bool model_job_ready;
 static double model_job_targets[4];
 static lv_obj_t *network_label;
 static lv_obj_t *identity_button;
+static bool identity_attention_shown;
 static lv_obj_t *wifi_scan_label;
 static lv_obj_t *wifi_network_list;
 static lv_obj_t *wifi_ssid_input;
@@ -62,6 +63,8 @@ static lv_obj_t *valve_action_label;
 static unsigned current_page;
 static char hmi_device_id[96] = "rk3506b-01";
 static char hmi_device_token[192] = "";
+
+static void show_page(unsigned selected);
 
 #define BOOT_FRAME_FILE "/userdata/zhirun/zhirun_boot_frames.rgb565"
 #define BOOT_AUDIO_FILE "/userdata/zhirun/zhirun_boot_audio.wav"
@@ -949,18 +952,33 @@ static void refresh(lv_timer_t *timer) {
     if (network_label) {
         char network_text[480], identity_response[1024], identity_code[16] = "";
         bool bound = false;
+        bool identity_received = false;
         char identity_path[192];
         snprintf(identity_path, sizeof(identity_path), "/device/identity?device_id=%s", hmi_device_id);
         if (request("GET", identity_path, NULL, identity_response, sizeof(identity_response)) == 0) {
+            identity_received = true;
             json_boolean(identity_response, "bound", &bound);
             json_string(identity_response, "code", identity_code, sizeof(identity_code));
         }
-        snprintf(network_text, sizeof(network_text),
-                 "Server: http://%s:%d | Device: %s\n%s%s%s\nWi-Fi or Ethernet supported | USB order independent",
-                 HMI_SERVER_HOST, HMI_SERVER_PORT, hmi_device_id,
-                 bound ? "Identity: BOUND" : "Identity code: ",
-                 bound ? "" : (identity_code[0] ? identity_code : "unavailable"),
-                 bound ? "" : " (valid 10 min)");
+        if (bound) {
+            snprintf(network_text, sizeof(network_text),
+                     "DEVICE BOUND TO ACCOUNT\nDevice: %s",
+                     hmi_device_id);
+        } else if (identity_code[0]) {
+            snprintf(network_text, sizeof(network_text),
+                     "BINDING CODE: %s\nValid 10 min | Enter after web login",
+                     identity_code);
+            if (!identity_attention_shown) {
+                fprintf(stderr, "HMI_IDENTITY code_received\n");
+                identity_attention_shown = true;
+                show_page(4);
+            }
+        } else {
+            snprintf(network_text, sizeof(network_text),
+                     "%s\nDevice: %s",
+                     identity_received ? "BINDING CODE UNAVAILABLE - TAP NEW CODE" : "CONNECTING TO BINDING SERVICE",
+                     hmi_device_id);
+        }
         lv_label_set_text(network_label, network_text);
         if (identity_button) {
             if (bound) lv_obj_add_state(identity_button, LV_STATE_DISABLED);
@@ -978,8 +996,8 @@ static void rotate_identity(lv_event_t *event) {
         json_string(response, "code", code, sizeof(code))) {
         char text[480];
         snprintf(text, sizeof(text),
-                 "Server: http://%s:%d | Device: %s\nIdentity code: %s (valid 10 min)\nWi-Fi or Ethernet supported | USB order independent",
-                 HMI_SERVER_HOST, HMI_SERVER_PORT, hmi_device_id, code);
+                 "BINDING CODE: %s\nValid 10 min | Enter after web login",
+                 code);
         lv_label_set_text(network_label, text);
     } else {
         lv_label_set_text(network_label, "Identity code refresh failed; check server connection and device token");
@@ -1282,7 +1300,8 @@ static void build_dashboard(void) {
     lv_label_set_text(model_stop_label, "STOP ALL");
     lv_obj_center(model_stop_label);
 
-    network_label = page_text(pages[4], "Local Wi-Fi: checking...", 7, 7, 600);
+    network_label = page_text(pages[4], "CONNECTING TO BINDING SERVICE", 7, 5, 600);
+    lv_obj_set_style_text_font(network_label, &lv_font_montserrat_24, 0);
     identity_button = lv_btn_create(pages[4]);
     lv_obj_set_pos(identity_button, 620, 5);
     lv_obj_set_size(identity_button, 145, 42);

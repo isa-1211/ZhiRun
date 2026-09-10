@@ -18,7 +18,10 @@ important parts of the web frontend without running a browser:
   connect without the server. Open networks can be connected without a
   password; the list and page can be scrolled on the 800x480 display.
 - an eight-digit, 10-minute device identity code on the Network page for
-  binding a phone/computer account; `NEW CODE` rotates an unbound code.
+  binding a phone/computer account; `NEW CODE` rotates an unbound code. The
+  first valid code automatically opens Network and appears in a large
+  `BINDING CODE` line. After the code is consumed, it is replaced by
+  `DEVICE BOUND TO ACCOUNT` and is never exposed again.
 
 The full model remains on the server. The board uses `/data`, `/weather`, and
 `/valve/config` for status. Its Model page requests the existing

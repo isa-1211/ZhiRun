@@ -1,0 +1,11 @@
+<resources>
+    <style name="Theme.ZhiRun" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">@color/zhirun_green</item>
+        <item name="android:navigationBarColor">@color/zhirun_background</item>
+        <item name="android:colorAccent">@color/zhirun_green</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>

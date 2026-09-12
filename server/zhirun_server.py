@@ -6,6 +6,7 @@
 实时数据页 /data、字段布局 /schema、设备状态 /config 与历史缓存。
 """
 import io
+import hashlib
 from http.cookies import SimpleCookie
 import hmac
 import json
@@ -1146,6 +1147,26 @@ class Handler(BaseHTTPRequestHandler):
                 "sms_enabled": AUTH_MODE == "full" and bool(SMS_WEBHOOK or AUTH_DEV_CODE),
                 "development_sms": bool(AUTH_DEV_CODE),
             })
+            return
+
+        if path == "/app/version":
+            try:
+                digest = hashlib.sha256()
+                for filename in ("index.html", "zhirun_server.py"):
+                    file_path = os.path.join(ROOT, filename)
+                    digest.update(filename.encode("utf-8"))
+                    with open(file_path, "rb") as handle:
+                        for chunk in iter(lambda: handle.read(65536), b""):
+                            digest.update(chunk)
+                content_version = digest.hexdigest()[:16]
+                self.send_json(200, {
+                    "ok": True,
+                    "content_version": content_version,
+                    "title": "智润界面已更新",
+                    "message": "点击立即更新即可同步最新功能和页面。",
+                })
+            except OSError:
+                self.send_json(503, {"ok": False, "error": "content_version_unavailable"})
             return
 
         if path == "/favicon.ico":

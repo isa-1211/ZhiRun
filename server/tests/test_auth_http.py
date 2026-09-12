@@ -153,6 +153,13 @@ class AuthHttpTests(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertEqual(result["error"], "auth_method_disabled")
 
+    def test_app_version_is_public_and_cache_safe(self):
+        status, result, headers = self.request("GET", "/app/version")
+        self.assertEqual(status, 200)
+        self.assertTrue(result["ok"])
+        self.assertRegex(result["content_version"], r"^[0-9a-f]{16}$")
+        self.assertIn("no-store", headers["Cache-Control"])
+
 
 if __name__ == "__main__":
     unittest.main()

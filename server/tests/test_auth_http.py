@@ -160,6 +160,47 @@ class AuthHttpTests(unittest.TestCase):
         self.assertRegex(result["content_version"], r"^[0-9a-f]{16}$")
         self.assertIn("no-store", headers["Cache-Control"])
 
+    def test_auto_model_schedule_can_be_updated(self):
+        original_schedule = zhirun_server._auto_model_state["schedule"]
+        bound_user_id = None
+        try:
+            status, identity, _ = self.request(
+                "GET", "/device/identity?device_id=" + self.device_id,
+                headers={"X-Device-Token": "device-secret"},
+            )
+            self.assertEqual(status, 200)
+            self.request("POST", "/auth/code/request", {"phone": "13800138003", "purpose": "login"})
+            status, login, headers = self.request(
+                "POST", "/auth/login/code", {"phone": "13800138003", "code": "123456"}
+            )
+            self.assertEqual(status, 200)
+            bound_user_id = login["id"]
+            cookie = headers["Set-Cookie"].split(";", 1)[0]
+            csrf = {"Cookie": cookie, "X-CSRF-Token": login["csrf_token"]}
+            status, _result, _ = self.request(
+                "POST", "/auth/device/bind", {"code": identity["code"]}, csrf
+            )
+            self.assertEqual(status, 200)
+
+            status, _result, _ = self.request(
+                "POST", "/fertigation/auto/schedule", {"schedule": "25:00"}, csrf
+            )
+            self.assertEqual(status, 400)
+            status, updated, _ = self.request(
+                "POST", "/fertigation/auto/schedule", {"schedule": "06:30"}, csrf
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(updated["schedule"], "06:30")
+            status, current, _ = self.request(
+                "GET", "/fertigation/auto/status", headers={"Cookie": cookie}
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(current["schedule"], "06:30")
+        finally:
+            if bound_user_id:
+                self.auth.unbind_device(bound_user_id, self.device_id)
+            zhirun_server._auto_model_state["schedule"] = original_schedule
+
     def test_one_account_can_switch_between_multiple_bound_devices(self):
         devices = {
             "multi-device-a": {"source": "rk3506", "device_name": "温室 A"},

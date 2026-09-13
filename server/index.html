@@ -164,6 +164,7 @@
   #p-model .model-shell{display:grid;grid-template-columns:minmax(280px,.72fr) minmax(0,1.7fr);gap:14px;width:100%}
   #p-model .model-service{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 16px;border:1px solid var(--line);border-radius:8px;background:#111b29}
   #p-model .model-service h2{margin:0;font-size:19px}.model-service-copy{display:flex;align-items:center;gap:14px;min-width:0}.model-tag{padding:4px 8px;border:1px solid #35526a;border-radius:5px;color:#a9c7df;font-size:11px}
+  .model-auto-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.model-auto-controls label{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px}.model-auto-controls input{height:34px;padding:0 8px;border:1px solid #344b61;border-radius:6px;background:#0f1825;color:var(--ink);font:inherit}.model-auto-controls button{height:34px;padding:0 10px;border:1px solid #3c6d64;border-radius:6px;background:#16362f;color:#b8eadc;cursor:pointer;font:inherit;font-size:12px}.model-auto-controls button:disabled{opacity:.55;cursor:wait}.model-auto-save-status{min-width:70px;color:var(--muted);font-size:11px}
   #p-model .model-card{min-width:0;padding:16px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
   #p-model .model-card h3{margin:0 0 12px;font-size:16px}.model-card .sub{margin:-5px 0 12px;font-size:12px}
   #p-model .concentration-list{display:grid;gap:10px}.concentration-row{display:grid;grid-template-columns:54px 1fr 42px;align-items:center;gap:8px}.concentration-row b{font-size:14px}.concentration-row .in{min-width:0}.model-crop-row{display:grid;grid-template-columns:54px 1fr;align-items:center;gap:8px;margin-bottom:11px}.model-crop-row label{font-size:13px;font-weight:700}.model-crop-row select{height:38px;min-width:0;padding:0 9px;border:1px solid var(--line);border-radius:6px;background:var(--panel2);color:var(--ink)}.model-date-note{margin:-3px 0 12px;color:var(--muted);font-size:11px}.farm-crop-control{display:flex;align-items:center;gap:5px;color:#657267;font-size:12px}.farm-crop-control select{height:34px;padding:0 7px;border:1px solid #d9e6da;border-radius:6px;background:#fff;color:#263629}
@@ -437,7 +438,7 @@
     <div class="model-shell">
       <section class="model-service">
         <div class="model-service-copy"><div><h2>水肥一体化 V2</h2><div class="sub">ExtraTrees 多输出策略 · 自动环境输入</div></div><span class="model-tag">39,600 条策略样本</span></div>
-        <div id="mHealth" class="mstat">检测服务器模型中…</div><div id="mAutoStatus" class="mstat">每日 12:00 自动检查</div>
+        <div id="mHealth" class="mstat">检测服务器模型中…</div><div id="mAutoStatus" class="mstat">每日 12:00 自动检查</div><div class="model-auto-controls"><label>自动执行时间 <input id="autoModelTime" type="time" value="12:00" step="60"></label><button type="button" onclick="saveAutoModelSchedule()">保存时间</button><span id="autoModelSaveStatus" class="model-auto-save-status"></span></div>
       </section>
       <section class="model-card">
         <h3>作物与日期</h3>
@@ -685,11 +686,25 @@ let lastData={}, gridBuilt=false, gridOrder=[];
 function syncAutoModelStatus(auto){
   const el=$('mAutoStatus');if(!el||!auto)return;
   if(auto.crop&&$('modelCrop')&&$('modelCrop').value!==auto.crop)syncCropSelection(auto.crop,false);
-  if(!auto.last_run_at){el.textContent='每日 12:00 自动检查 · 尚未运行';return;}
+  const schedule=auto.schedule||'12:00';
+  const input=$('autoModelTime');if(input&&document.activeElement!==input)input.value=schedule;
+  const saveStatus=$('autoModelSaveStatus');if(saveStatus&&!saveStatus.textContent)saveStatus.textContent='';
+  if(!auto.last_run_at){el.textContent='每日 '+schedule+' 自动检查 · 尚未运行';el.className='mstat';return;}
   const stamp=new Date(Number(auto.last_run_at)*1000).toLocaleString();
   const status=auto.last_status==='ok'?'已完成':(auto.last_status==='rejected'?'已拒绝':'异常');
-  el.textContent='每日 12:00 自动检查 · '+status+' · '+stamp;
+  el.textContent='每日 '+schedule+' 自动检查 · '+status+' · '+stamp;
   el.className='mstat '+(auto.last_status==='ok'?'ok':'bad');
+}
+async function saveAutoModelSchedule(){
+  const input=$('autoModelTime'),button=document.querySelector('.model-auto-controls button'),status=$('autoModelSaveStatus');
+  const schedule=input?.value||'';
+  if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(schedule)){if(status)status.textContent='请输入有效时间';return;}
+  if(button)button.disabled=true;if(status)status.textContent='保存中…';
+  try{
+    const data=await authApi('/fertigation/auto/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({schedule})});
+    syncAutoModelStatus(data);if(status)status.textContent='已保存';
+  }catch(e){if(status)status.textContent=e.message||'保存失败';}
+  finally{if(button)button.disabled=false;}
 }
 const DASHBOARD_HIDDEN_KEYS=new Set();
 function orderFields(){

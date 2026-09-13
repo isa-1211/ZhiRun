@@ -309,6 +309,19 @@ def safe_device_id(value):
     return value[:96]
 
 
+def normalize_auto_schedule(value):
+    """Return a validated 24-hour HH:MM schedule or None."""
+    if not isinstance(value, str):
+        return None
+    parts = value.strip().split(":")
+    if len(parts) != 2 or any(not part.isdigit() for part in parts):
+        return None
+    hour, minute = (int(part) for part in parts)
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return f"{hour:02d}:{minute:02d}"
+
+
 def load_state():
     if not os.path.exists(STATE_FILE):
         return
@@ -327,6 +340,10 @@ def load_state():
         saved_crop = state.get("settings", {}).get("crop") if isinstance(state.get("settings"), dict) else None
         if saved_crop in AUTO_MODEL_CROPS:
             _auto_model_state["crop"] = saved_crop
+        saved_schedule = state.get("settings", {}).get("auto_schedule") if isinstance(state.get("settings"), dict) else None
+        normalized_schedule = normalize_auto_schedule(saved_schedule)
+        if normalized_schedule:
+            _auto_model_state["schedule"] = normalized_schedule
         if len(allowed_ids) != len(devices):
             mark_dirty()
     except Exception as exc:
@@ -350,7 +367,10 @@ def save_state(force=False):
             "latest": _latest_by_device,
             "history": _history_by_device,
             "recordings": _recordings_by_device,
-            "settings": {"crop": _auto_model_state.get("crop", AUTO_MODEL_CROP)},
+            "settings": {
+                "crop": _auto_model_state.get("crop", AUTO_MODEL_CROP),
+                "auto_schedule": _auto_model_state.get("schedule", f"{AUTO_MODEL_HOUR:02d}:{AUTO_MODEL_MINUTE:02d}"),
+            },
         }
         _save_dirty = False
     tmp = STATE_FILE + ".tmp"
@@ -442,16 +462,22 @@ def _auto_model_once():
 
 
 def _auto_model_loop():
-    last_run_day = None
+    last_run_key = None
     while True:
         try:
             local = time.localtime()
             day = (local.tm_year, local.tm_yday)
             minute = local.tm_hour * 60 + local.tm_min
-            target = AUTO_MODEL_HOUR * 60 + AUTO_MODEL_MINUTE
-            if AUTO_MODEL_ENABLED and target <= minute < target + 5 and day != last_run_day:
+            with _lock:
+                schedule = normalize_auto_schedule(_auto_model_state.get("schedule"))
+                enabled = bool(_auto_model_state.get("enabled", AUTO_MODEL_ENABLED))
+            schedule = schedule or f"{AUTO_MODEL_HOUR:02d}:{AUTO_MODEL_MINUTE:02d}"
+            schedule_hour, schedule_minute = (int(part) for part in schedule.split(":"))
+            target = schedule_hour * 60 + schedule_minute
+            run_key = (day, schedule)
+            if enabled and target <= minute < target + 5 and run_key != last_run_key:
                 _auto_model_once()
-                last_run_day = day
+                last_run_key = run_key
         except Exception as exc:
             print("每日模型调度异常:", exc, file=sys.stderr)
         time.sleep(20)
@@ -1536,6 +1562,22 @@ class Handler(BaseHTTPRequestHandler):
                 _auto_model_state["crop"] = crop
                 mark_dirty()
             self.send_json(200, {"ok": True, "crop": crop})
+            return
+
+        if path == "/fertigation/auto/schedule":
+            schedule = normalize_auto_schedule(obj.get("schedule") or obj.get("time"))
+            if not schedule:
+                self.send_json(400, {
+                    "ok": False,
+                    "message": "invalid_schedule",
+                    "detail": "schedule must be a 24-hour HH:MM value",
+                })
+                return
+            with _lock:
+                _auto_model_state["schedule"] = schedule
+                mark_dirty()
+                response = dict(_auto_model_state)
+            self.send_json(200, {"ok": True, **response})
             return
 
         if path == "/fertigation/predict":

@@ -160,6 +160,55 @@ class AuthHttpTests(unittest.TestCase):
         self.assertRegex(result["content_version"], r"^[0-9a-f]{16}$")
         self.assertIn("no-store", headers["Cache-Control"])
 
+    def test_one_account_can_switch_between_multiple_bound_devices(self):
+        devices = {
+            "multi-device-a": {"source": "rk3506", "device_name": "温室 A"},
+            "multi-device-b": {"source": "rk3506", "device_name": "温室 B"},
+        }
+        for device_id, metadata in devices.items():
+            zhirun_server._devices[device_id] = metadata
+            zhirun_server._latest_by_device[device_id] = {
+                "_ts": zhirun_server.now(),
+                "soilMoist": 21.0 if device_id.endswith("a") else 78.0,
+            }
+        try:
+            codes = {}
+            for device_id in devices:
+                status, identity, _ = self.request(
+                    "GET", "/device/identity?device_id=" + device_id,
+                    headers={"X-Device-Token": "device-secret"},
+                )
+                self.assertEqual(status, 200)
+                codes[device_id] = identity["code"]
+
+            self.request("POST", "/auth/code/request", {"phone": "13800138002", "purpose": "login"})
+            status, login, headers = self.request(
+                "POST", "/auth/login/code", {"phone": "13800138002", "code": "123456"}
+            )
+            self.assertEqual(status, 200)
+            cookie = headers["Set-Cookie"].split(";", 1)[0]
+            csrf = {"Cookie": cookie, "X-CSRF-Token": login["csrf_token"]}
+            for code in codes.values():
+                status, _result, _ = self.request("POST", "/auth/device/bind", {"code": code}, csrf)
+                self.assertEqual(status, 200)
+
+            status, listed, _ = self.request("GET", "/auth/devices", headers={"Cookie": cookie})
+            self.assertEqual(status, 200)
+            self.assertEqual(listed["count"], 2)
+            self.assertEqual({item["device_id"] for item in listed["devices"]}, set(devices))
+
+            selected_headers = {"Cookie": cookie, "X-ZhiRun-Device": "multi-device-b"}
+            status, data, _ = self.request("GET", "/data", headers=selected_headers)
+            self.assertEqual(status, 200)
+            self.assertEqual(data["soilMoist"], 78.0)
+            status, selected, _ = self.request("GET", "/auth/devices", headers=selected_headers)
+            self.assertEqual(status, 200)
+            self.assertEqual(selected["selected_device_id"], "multi-device-b")
+        finally:
+            for device_id in devices:
+                zhirun_server._devices.pop(device_id, None)
+                zhirun_server._latest_by_device.pop(device_id, None)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1185,6 +1185,25 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, payload)
             return
 
+        if path == "/auth/devices":
+            session = self.require_user(device_required=False)
+            if not session:
+                return
+            allowed = AUTH.device_ids(int(session["user_id"]))
+            with _lock:
+                devices = [device_snapshot(device_id) for device_id in allowed]
+            devices.sort(key=lambda item: item.get("last_seen", 0), reverse=True)
+            selected = safe_device_id(self.headers.get("X-ZhiRun-Device", ""))
+            if selected not in allowed:
+                selected = devices[0].get("device_id") if devices else None
+            self.send_json(200, {
+                "ok": True,
+                "devices": devices,
+                "count": len(devices),
+                "selected_device_id": selected,
+            })
+            return
+
         if path == "/auth/wechat/start":
             if AUTH_MODE != "full":
                 self.send_json(403, {"ok": False, "error": "auth_method_disabled", "message": "微信登录暂未开放"})

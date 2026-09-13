@@ -1,4 +1,4 @@
-"""Deploy only the public app-version endpoint and web server code.
+"""Deploy the public app-version endpoint and web server/page code.
 
 This intentionally leaves the server data, auth database, model service, and
 device configuration untouched. Set ZHIRUN_BUILD_PASSWORD before running.
@@ -41,10 +41,12 @@ def main():
     )
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d%H%M%S")
     remote_tmp = f"/tmp/zhirun_server_{stamp}.py"
+    remote_html = f"/tmp/zhirun_index_{stamp}.html"
     backup_dir = f"/opt/zhirun/server/backups/app-version-{stamp}"
     sftp = client.open_sftp()
     try:
         sftp.put(str(PROJECT / "server" / "zhirun_server.py"), remote_tmp)
+        sftp.put(str(PROJECT / "server" / "index.html"), remote_html)
     finally:
         sftp.close()
 
@@ -52,7 +54,9 @@ def main():
     run(
         client,
         f"mkdir -p {backup_dir}; cp -p /opt/zhirun/server/zhirun_server.py {backup_dir}/zhirun_server.py; "
+        f"cp -p /opt/zhirun/server/index.html {backup_dir}/index.html; "
         f"install -o zhirun -g zhirun -m 0644 {remote_tmp} /opt/zhirun/server/zhirun_server.py; "
+        f"install -o zhirun -g zhirun -m 0644 {remote_html} /opt/zhirun/server/index.html; "
         "systemctl restart zhirun-server.service; sleep 3; "
         "systemctl is-active zhirun-server.service; "
         "curl -fsS http://127.0.0.1:10000/app/version; echo",

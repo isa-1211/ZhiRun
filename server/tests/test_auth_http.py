@@ -97,6 +97,27 @@ class AuthHttpTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(data["soilMoist"], 38.2)
 
+        start_at = zhirun_server.now() + 120
+        status, recording, _ = self.request(
+            "POST",
+            "/recording/start",
+            {"start_at": start_at, "end_at": start_at + 3600, "interval_seconds": 30},
+            csrf_headers,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(recording["status"], "scheduled")
+        self.assertEqual(recording["interval_seconds"], 30)
+        status, recording, _ = self.request(
+            "GET", "/recording/status", headers={"Cookie": cookie}
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(recording["scheduled"])
+        status, recording, _ = self.request(
+            "POST", "/recording/clear", {}, csrf_headers
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(recording["status"], "idle")
+
         status, _, _ = self.request(
             "POST", "/auth/device/unbind", {"device_id": self.device_id}, {"Cookie": cookie}
         )

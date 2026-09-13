@@ -79,7 +79,9 @@ if AUTO_MODEL_CROP not in AUTO_MODEL_CROPS:
     AUTO_MODEL_CROP = "玉米"
 HISTORY_LIMIT = 720
 RECORD_INTERVAL_SECONDS = 5 * 60
-RECORDING_LIMIT = 105120  # Five-minute samples for one year.
+RECORDING_LIMIT = 105120  # Per-device workbook row cap.
+RECORD_INTERVAL_MIN_SECONDS = 5
+RECORD_INTERVAL_MAX_SECONDS = 24 * 60 * 60
 LEGACY_DEVICE_ID = "legacy-default"
 
 # ---- 固定字段布局 ------------------------------------------------------------
@@ -726,34 +728,102 @@ def recording_sample(data, recorded_at):
     return sample
 
 
+def recording_interval(recording):
+    try:
+        interval = int(recording.get("interval_seconds", RECORD_INTERVAL_SECONDS))
+    except (TypeError, ValueError):
+        interval = RECORD_INTERVAL_SECONDS
+    return min(RECORD_INTERVAL_MAX_SECONDS, max(RECORD_INTERVAL_MIN_SECONDS, interval))
+
+
+def refresh_recording_state(device_id, timestamp=None):
+    recording = _recordings_by_device.get(device_id) if device_id else None
+    if not recording:
+        return False
+    timestamp = now() if timestamp is None else int(timestamp)
+    changed = False
+    end_at = int(recording.get("scheduled_end_at", 0) or 0)
+    start_at = int(recording.get("scheduled_start_at", 0) or 0)
+    if (recording.get("active") or recording.get("scheduled")) and end_at and timestamp >= end_at:
+        recording["scheduled"] = False
+        recording["active"] = False
+        recording["status"] = "completed"
+        recording["stopped_at"] = timestamp
+        recording["next_sample_at"] = 0
+        mark_dirty()
+        return True
+    if recording.get("scheduled") and start_at and timestamp >= start_at:
+        recording["scheduled"] = False
+        recording["active"] = True
+        recording["status"] = "active"
+        recording["started_at"] = timestamp
+        recording["next_sample_at"] = start_at
+        changed = True
+    if changed:
+        mark_dirty()
+    return changed
+
+
 def recording_snapshot(device_id):
+    refresh_recording_state(device_id)
     recording = _recordings_by_device.get(device_id, {}) if device_id else {}
+    status = recording.get("status")
+    if not status:
+        status = "active" if recording.get("active") else ("stopped" if recording else "idle")
+    start_at = int(recording.get("scheduled_start_at", 0) or 0)
+    end_at = int(recording.get("scheduled_end_at", 0) or 0)
+    interval_seconds = recording_interval(recording)
+    items = recording.get("items", [])
+    duration_seconds = max(0, end_at - start_at) if start_at and end_at else 0
     return {
         "ok": True,
         "device_id": device_id,
+        "status": status,
         "active": bool(recording.get("active")),
+        "scheduled": bool(recording.get("scheduled")),
         "started_at": int(recording.get("started_at", 0) or 0),
         "stopped_at": int(recording.get("stopped_at", 0) or 0),
+        "scheduled_start_at": int(recording.get("scheduled_start_at", 0) or 0),
+        "scheduled_end_at": int(recording.get("scheduled_end_at", 0) or 0),
         "next_sample_at": int(recording.get("next_sample_at", 0) or 0),
-        "sample_count": len(recording.get("items", [])),
-        "interval_seconds": RECORD_INTERVAL_SECONDS,
-        "can_export": bool(recording.get("items")),
+        "last_sample_at": int(items[-1].get("_recorded_at", 0) or 0) if items else 0,
+        "sample_count": len(items),
+        "interval_seconds": interval_seconds,
+        "duration_seconds": duration_seconds,
+        "estimated_samples": (duration_seconds // interval_seconds + 1) if duration_seconds else 0,
+        "can_export": bool(items),
     }
 
 
-def start_recording(device_id):
+def start_recording(device_id, interval_seconds=RECORD_INTERVAL_SECONDS, start_at=None, end_at=None):
     timestamp = now()
+    try:
+        interval_seconds = int(interval_seconds)
+        start_at = int(start_at or timestamp)
+        end_at = int(end_at or 0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid_recording_config") from exc
+    if not RECORD_INTERVAL_MIN_SECONDS <= interval_seconds <= RECORD_INTERVAL_MAX_SECONDS:
+        raise ValueError("invalid_recording_interval")
+    if end_at and end_at <= max(timestamp, start_at):
+        raise ValueError("invalid_recording_period")
     existing = _recordings_by_device.get(device_id, {})
-    if existing.get("active"):
+    if existing.get("active") or existing.get("scheduled"):
         return recording_snapshot(device_id)
 
     latest = _latest_by_device.get(device_id, {})
-    items = [recording_sample(latest, timestamp)] if latest.get("_ts") else []
+    scheduled = start_at > timestamp
+    items = [recording_sample(latest, timestamp)] if not scheduled and latest.get("_ts") else []
     _recordings_by_device[device_id] = {
-        "active": True,
-        "started_at": timestamp,
+        "status": "scheduled" if scheduled else "active",
+        "scheduled": scheduled,
+        "active": not scheduled,
+        "started_at": 0 if scheduled else timestamp,
         "stopped_at": 0,
-        "next_sample_at": timestamp + RECORD_INTERVAL_SECONDS if items else timestamp,
+        "scheduled_start_at": start_at,
+        "scheduled_end_at": end_at,
+        "interval_seconds": interval_seconds,
+        "next_sample_at": start_at if scheduled else (timestamp + interval_seconds if items else timestamp),
         "items": items,
     }
     mark_dirty()
@@ -762,8 +832,10 @@ def start_recording(device_id):
 
 def stop_recording(device_id):
     recording = _recordings_by_device.get(device_id)
-    if recording and recording.get("active"):
+    if recording and (recording.get("active") or recording.get("scheduled")):
+        recording["scheduled"] = False
         recording["active"] = False
+        recording["status"] = "stopped"
         recording["stopped_at"] = now()
         recording["next_sample_at"] = 0
         mark_dirty()
@@ -772,6 +844,7 @@ def stop_recording(device_id):
 
 def maybe_record_sample(device_id, data, timestamp):
     recording = _recordings_by_device.get(device_id)
+    refresh_recording_state(device_id, timestamp)
     if not recording or not recording.get("active"):
         return
     next_sample_at = int(recording.get("next_sample_at", 0) or timestamp)
@@ -780,11 +853,13 @@ def maybe_record_sample(device_id, data, timestamp):
 
     items = recording.setdefault("items", [])
     items.append(recording_sample(data, timestamp))
-    elapsed_intervals = (timestamp - next_sample_at) // RECORD_INTERVAL_SECONDS + 1
-    next_sample_at += elapsed_intervals * RECORD_INTERVAL_SECONDS
+    interval_seconds = recording_interval(recording)
+    elapsed_intervals = (timestamp - next_sample_at) // interval_seconds + 1
+    next_sample_at += elapsed_intervals * interval_seconds
     recording["next_sample_at"] = next_sample_at
     if len(items) >= RECORDING_LIMIT:
         recording["active"] = False
+        recording["status"] = "completed"
         recording["stopped_at"] = timestamp
         recording["next_sample_at"] = 0
 
@@ -872,7 +947,7 @@ def recording_xlsx(device_id, recording):
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
         'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-        f'<sheets><sheet name="五分钟数据" sheetId="1" r:id="rId1"/></sheets></workbook>'
+        f'<sheets><sheet name="传感器记录" sheetId="1" r:id="rId1"/></sheets></workbook>'
     )
     workbook_rels = (
         '<?xml version="1.0" encoding="UTF-8"?>'
@@ -1664,14 +1739,30 @@ class Handler(BaseHTTPRequestHandler):
                                  "command_id": command["id"], "message": "command_queued"})
             return
 
-        if path in {"/recording/start", "/recording/stop"}:
+        if path in {"/recording/start", "/recording/stop", "/recording/clear"}:
             requested_device_id = obj.get("device_id")
             with _lock:
                 device_id = current_device_id(requested_device_id)
                 if not device_id or device_id not in _latest_by_device:
                     self.send_json(503, {"ok": False, "message": "no_device_data"})
                     return
-                result = start_recording(device_id) if path.endswith("/start") else stop_recording(device_id)
+                if path.endswith("/start"):
+                    try:
+                        result = start_recording(
+                            device_id,
+                            obj.get("interval_seconds", RECORD_INTERVAL_SECONDS),
+                            obj.get("start_at"),
+                            obj.get("end_at"),
+                        )
+                    except ValueError as exc:
+                        self.send_json(400, {"ok": False, "message": str(exc)})
+                        return
+                elif path.endswith("/stop"):
+                    result = stop_recording(device_id)
+                else:
+                    _recordings_by_device.pop(device_id, None)
+                    mark_dirty()
+                    result = recording_snapshot(device_id)
             self.send_json(200, result)
             return
 

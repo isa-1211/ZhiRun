@@ -1,0 +1,50 @@
+{
+  "name": "zhirun-windows",
+  "version": "1.0.0",
+  "description": "智润智慧农业水肥一体系统 Windows 桌面端",
+  "main": "main.js",
+  "author": "李天浩",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis portable",
+    "dist:portable": "electron-builder --win portable",
+    "dist:installer": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "44.3.0",
+    "electron-builder": "26.0.12"
+  },
+  "build": {
+    "appId": "com.zhirun.desktop",
+    "productName": "智润",
+    "artifactName": "ZhiRun-Setup-${version}.${ext}",
+    "directories": {
+      "output": "dist",
+      "buildResources": "resources"
+    },
+    "files": [
+      "main.js",
+      "README.md",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "智润"
+    },
+    "portable": {
+      "artifactName": "ZhiRun-${version}-portable.${ext}"
+    }
+  }
+}

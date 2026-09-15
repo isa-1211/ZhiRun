@@ -32,6 +32,8 @@ esp32_pump_controller/.venv/
 
 # Local toolchains and downloaded build dependencies
 downloads/
+windows-app/node_modules/
+windows-app/dist/
 toolchain/
 vendor_lvgl_demo2/
 
